@@ -117,7 +117,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     }
   }, [level.id]);
 
-  const handleTutorialComplete = useCallback(() => {
+  const handleTutorialClose = useCallback(() => {
     setTutorialCompleted(true);
     setShowTutorial(false);
   }, []);
@@ -574,8 +574,8 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       {showTutorial && (
         <Tutorial
           steps={tutorialSteps}
-          onClose={() => setShowTutorial(false)}
-          onComplete={handleTutorialComplete}
+          onClose={handleTutorialClose}
+          onComplete={handleTutorialClose}
         />
       )}
     </div>
