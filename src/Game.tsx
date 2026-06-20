@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { LevelDef, CANVAS_W, CANVAS_H, levels, calculateEarnedStars } from "./levels";
 import { Progress, getStars, isTutorialCompleted, setTutorialCompleted } from "./progress";
 import Tutorial, { TutorialStep } from "./Tutorial";
+import { useGameViewport, screenToWorld, ViewportInfo } from "./useGameViewport";
 
 interface Props {
   level: LevelDef;
@@ -76,6 +77,9 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
   const hasNextLevel = levels.some((l) => l.id === level.id + 1);
   const prevBestStars = getStars(level.id, progress);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewport = useGameViewport();
+  const viewportRef = useRef<ViewportInfo>(viewport);
+  viewportRef.current = viewport;
   const rafRef = useRef(0);
   const ballRef = useRef<Ball>({
     x: level.ball.x,
@@ -406,13 +410,21 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       const currentPhase = phaseRef.current;
       const trail = trailRef.current;
       const shake = screenShakeRef.current;
+      const vp = viewportRef.current;
+      const dpr = window.devicePixelRatio || 1;
 
       ctx.save();
-      ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, vp.canvasWidth, vp.canvasHeight);
 
       ctx.fillStyle = "#0f172a";
-      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      ctx.fillRect(0, 0, vp.canvasWidth, vp.canvasHeight);
 
+      ctx.save();
+      ctx.translate(vp.offsetX, vp.offsetY);
+      ctx.scale(vp.scale, vp.scale);
+
+      ctx.save();
       ctx.translate(shake.x, shake.y);
 
       ctx.strokeStyle = "rgba(148,163,184,0.12)";
@@ -820,6 +832,8 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       });
 
       ctx.restore();
+      ctx.restore();
+      ctx.restore();
     }
 
     function roundRect(
@@ -1055,19 +1069,19 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
 
     function getPos(e: MouseEvent | TouchEvent) {
       const rect = canvasEl.getBoundingClientRect();
-      const scaleX = CANVAS_W / rect.width;
-      const scaleY = CANVAS_H / rect.height;
+      let clientX: number;
+      let clientY: number;
       if ("touches" in e) {
         const t = e.touches[0] || e.changedTouches[0];
-        return {
-          x: (t.clientX - rect.left) * scaleX,
-          y: (t.clientY - rect.top) * scaleY,
-        };
+        clientX = t.clientX;
+        clientY = t.clientY;
+      } else {
+        clientX = e.clientX;
+        clientY = e.clientY;
       }
-      return {
-        x: (e.clientX - rect.left) * scaleX,
-        y: (e.clientY - rect.top) * scaleY,
-      };
+      const screenX = clientX - rect.left;
+      const screenY = clientY - rect.top;
+      return screenToWorld(screenX, screenY, viewportRef.current);
     }
 
     function onDown(e: MouseEvent | TouchEvent) {
@@ -1159,8 +1173,16 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     resetBall();
   }
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(viewport.canvasWidth * dpr);
+    canvas.height = Math.floor(viewport.canvasHeight * dpr);
+  }, [viewport.canvasWidth, viewport.canvasHeight]);
+
   return (
-    <div className="game-view">
+    <div className={`game-view ${viewport.isLandscape ? "landscape" : "portrait"}`}>
       <div className="game-hud">
         <button className="btn-back" onClick={onBack}>
           ← 返回
@@ -1182,15 +1204,14 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         >
           ⭐ 星级规则
         </button>
-        <button className="btn-tutorial" onClick={() => setShowTutorial(true)}>
+        <button className="btn-tutorial" onClick={() => setShowTutorial(true)}
+        >
           ❓ 帮助
         </button>
       </div>
-      <div className="canvas-wrap">
+      <div ref={viewport.containerRef} className="canvas-wrap">
         <canvas
           ref={canvasRef}
-          width={CANVAS_W}
-          height={CANVAS_H}
           className={phase === "aim" ? "aiming" : ""}
         />
         {phase === "aim" && (

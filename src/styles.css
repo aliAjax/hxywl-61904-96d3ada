@@ -276,14 +276,80 @@ button {
 .game-view {
   margin-top: 20px;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.game-view.portrait {
+  height: auto;
+}
+
+.game-view.landscape {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.game-view.landscape .game-hud {
+  grid-column: 1 / 2;
+  grid-row: 1 / -1;
+  flex-direction: column;
+  align-items: stretch;
+  height: 100%;
+  max-height: calc(100vh - 120px);
+  position: sticky;
+  top: 20px;
+  gap: 10px;
+  padding: 16px 14px;
+}
+
+.game-view.landscape .hud-level {
+  font-size: 15px;
+  text-align: center;
+  order: -1;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  margin-bottom: 4px;
+}
+
+.game-view.landscape .btn-back {
+  order: -2;
+  text-align: center;
+}
+
+.game-view.landscape .hud-shots,
+.game-view.landscape .hud-stars {
+  text-align: center;
+  font-size: 14px;
+  padding: 6px 10px;
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.game-view.landscape .btn-star-rules,
+.game-view.landscape .btn-tutorial {
+  width: 100%;
+  justify-content: center;
+}
+
+.game-view.landscape .canvas-wrap {
+  grid-column: 2 / 3;
+  grid-row: 1 / -1;
+  height: calc(100vh - 120px);
+  min-height: 400px;
+  position: sticky;
+  top: 20px;
 }
 
 .game-hud {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
   padding: 12px 18px;
   border-radius: 14px;
   background: rgba(15, 23, 42, 0.72);
@@ -299,6 +365,7 @@ button {
   background: #f8fafc;
   cursor: pointer;
   transition: background 120ms ease;
+  white-space: nowrap;
 }
 
 .btn-back:hover {
@@ -317,6 +384,10 @@ button {
   color: #eab308;
 }
 
+.game-view.landscape .hud-shots {
+  margin-left: 0;
+}
+
 .hud-stars {
   font-weight: 700;
   color: #fbbf24;
@@ -328,12 +399,21 @@ button {
   overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.22);
   background: #0f172a;
+  width: 100%;
+  min-height: 300px;
+  aspect-ratio: 8 / 5;
+}
+
+.game-view.portrait .canvas-wrap {
+  aspect-ratio: 8 / 5;
+  max-height: 60vh;
 }
 
 .canvas-wrap canvas {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+  touch-action: none;
 }
 
 .canvas-wrap canvas.aiming {
@@ -587,7 +667,29 @@ button {
   }
 
   .game-hud {
-    gap: 10px;
+    gap: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  .game-hud .btn-back,
+  .game-hud .btn-star-rules,
+  .game-hud .btn-tutorial {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .hud-level {
+    font-size: 14px;
+  }
+
+  .hud-shots,
+  .hud-stars {
+    font-size: 13px;
+  }
+
+  .game-view.portrait .canvas-wrap {
+    max-height: 55vh;
   }
 
   .result-actions {
@@ -602,6 +704,59 @@ button {
     padding: 28px 24px;
     min-width: auto;
     margin: 0 16px;
+  }
+
+  .game-view.landscape {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .game-view.landscape .game-hud {
+    position: static;
+    flex-direction: row;
+    align-items: center;
+    height: auto;
+    max-height: none;
+  }
+
+  .game-view.landscape .canvas-wrap {
+    position: static;
+    height: auto;
+    min-height: 300px;
+  }
+}
+
+@media (max-width: 480px) {
+  .game-shell {
+    width: calc(100% - 16px);
+    padding: 16px 0 24px;
+  }
+
+  .game-hud {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .hud-level {
+    font-size: 13px;
+    order: -1;
+    flex-basis: 100%;
+    text-align: center;
+  }
+
+  .hud-shots {
+    margin-left: 0;
+  }
+
+  .game-view.portrait .canvas-wrap {
+    max-height: 50vh;
+    min-height: 260px;
+  }
+
+  .aim-hint {
+    font-size: 12px;
+    padding: 5px 12px;
+    bottom: 10px;
   }
 }
 
@@ -767,6 +922,10 @@ button {
   cursor: pointer;
   transition: transform 120ms ease, box-shadow 120ms ease;
   box-shadow: 0 2px 8px rgba(251, 191, 36, 0.3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
 .btn-tutorial:hover {
@@ -785,6 +944,10 @@ button {
   cursor: pointer;
   transition: transform 120ms ease, box-shadow 120ms ease;
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
 .btn-star-rules:hover {
