@@ -1,8 +1,10 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { LevelDef, CANVAS_W, CANVAS_H, levels } from "./levels";
+import { Progress, getStars } from "./progress";
 
 interface Props {
   level: LevelDef;
+  progress: Progress;
   onBack: () => void;
   onComplete: (levelId: number, stars: number, cleared: boolean) => void;
   onNext: () => void;
@@ -32,8 +34,9 @@ const MIN_SPEED = 0.3;
 const MAX_DRAG = 140;
 const LAUNCH_POWER = 0.12;
 
-export default function Game({ level, onBack, onComplete, onNext }: Props) {
+export default function Game({ level, progress, onBack, onComplete, onNext }: Props) {
   const hasNextLevel = levels.some((l) => l.id === level.id + 1);
+  const prevBestStars = getStars(level.id, progress);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
   const ballRef = useRef<Ball>({
@@ -51,12 +54,15 @@ export default function Game({ level, onBack, onComplete, onNext }: Props) {
   const shotsRef = useRef(level.maxShots);
   const collectedRef = useRef(0);
   const clearedRef = useRef(false);
+  const remainingShotsRef = useRef(level.maxShots);
 
   const [phase, setPhase] = useState<Phase>("aim");
   const [shots, setShots] = useState(level.maxShots);
   const [collected, setCollected] = useState(0);
   const [resultStars, setResultStars] = useState(0);
+  const [remainingShots, setRemainingShots] = useState(level.maxShots);
   const [showResult, setShowResult] = useState(false);
+  const [isNewRecord, setIsNewRecord] = useState(false);
 
   const resetBall = useCallback(() => {
     ballRef.current = {
@@ -82,11 +88,15 @@ export default function Game({ level, onBack, onComplete, onNext }: Props) {
             ? 2
             : 1
         : 0;
+      const remaining = shotsRef.current;
+      remainingShotsRef.current = remaining;
+      setRemainingShots(remaining);
       setResultStars(earnedStars);
+      setIsNewRecord(earnedStars > prevBestStars);
       setShowResult(true);
       onComplete(level.id, earnedStars, cleared);
     },
-    [level, onComplete]
+    [level, onComplete, prevBestStars]
   );
 
   useEffect(() => {
@@ -407,9 +417,12 @@ export default function Game({ level, onBack, onComplete, onNext }: Props) {
     collectedRef.current = 0;
     clearedRef.current = false;
     shotsRef.current = level.maxShots;
+    remainingShotsRef.current = level.maxShots;
     setShots(level.maxShots);
     setCollected(0);
     setResultStars(0);
+    setRemainingShots(level.maxShots);
+    setIsNewRecord(false);
     setShowResult(false);
     resetBall();
   }
@@ -444,23 +457,58 @@ export default function Game({ level, onBack, onComplete, onNext }: Props) {
       {showResult && (
         <div className="result-overlay">
           <div className="result-card">
-            <h3>{clearedRef.current ? "🎉 通关成功" : "💀 弹射耗尽"}</h3>
+            <h3 className={clearedRef.current ? "result-title success" : "result-title fail"}>
+              {clearedRef.current ? "🎉 通关成功" : "💀 弹射耗尽"}
+            </h3>
+            {isNewRecord && clearedRef.current && (
+              <div className="new-record-badge">🏆 新纪录！</div>
+            )}
             <div className="result-stars">
               {[1, 2, 3].map((i) => (
                 <span
                   key={i}
-                  className={i <= resultStars ? "star filled" : "star empty"}
+                  className={
+                    "star " + (i <= resultStars ? "filled" : "empty") +
+                    (isNewRecord && i <= resultStars ? " animate-star" : "")
+                  }
                 >
                   ★
                 </span>
               ))}
             </div>
-            <p>
-              收集星星: {collected}/{level.stars.length}
-            </p>
+            <div className="result-stats">
+              <div className="result-stat-item">
+                <span className="result-stat-label">收集星星</span>
+                <span className="result-stat-value">
+                  <span className="star-icon">★</span>
+                  {collected} / {level.stars.length}
+                </span>
+              </div>
+              <div className="result-stat-item">
+                <span className="result-stat-label">剩余弹射</span>
+                <span className="result-stat-value shots-value">
+                  {remainingShots} / {level.maxShots}
+                </span>
+              </div>
+              <div className="result-stat-item">
+                <span className="result-stat-label">最终星级</span>
+                <span className="result-stat-value stars-value">
+                  {resultStars} / 3
+                </span>
+              </div>
+              {prevBestStars > 0 && (
+                <div className="result-stat-item best-record">
+                  <span className="result-stat-label">历史最佳</span>
+                  <span className="result-stat-value">
+                    <span className="star-icon">★</span>
+                    {prevBestStars} / 3
+                  </span>
+                </div>
+              )}
+            </div>
             <div className="result-actions">
               <button className="btn-retry" onClick={handleRetry}>
-                重新挑战
+                🔄 重新挑战
               </button>
               {clearedRef.current && hasNextLevel && (
                 <button className="btn-next" onClick={onNext}>

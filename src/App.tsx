@@ -60,6 +60,7 @@ function App() {
         <Game
           key={currentLevel.id}
           level={currentLevel}
+          progress={progress}
           onBack={handleBack}
           onComplete={handleComplete}
           onNext={handleNext}
