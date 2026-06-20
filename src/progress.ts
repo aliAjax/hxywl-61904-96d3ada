@@ -1,4 +1,5 @@
 const KEY = "hxywl-61904-progress";
+const TUTORIAL_KEY = "hxywl-61904-tutorial-completed";
 
 export interface LevelProgress {
   stars: number;
@@ -42,4 +43,18 @@ export function updateLevelResult(
   };
   saveProgress(next);
   return next;
+}
+
+export function isTutorialCompleted(): boolean {
+  try {
+    return localStorage.getItem(TUTORIAL_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function setTutorialCompleted(completed: boolean) {
+  try {
+    localStorage.setItem(TUTORIAL_KEY, String(completed));
+  } catch {}
 }

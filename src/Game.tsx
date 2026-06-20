@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { LevelDef, CANVAS_W, CANVAS_H, levels } from "./levels";
-import { Progress, getStars } from "./progress";
+import { Progress, getStars, isTutorialCompleted, setTutorialCompleted } from "./progress";
+import Tutorial, { TutorialStep } from "./Tutorial";
 
 interface Props {
   level: LevelDef;
@@ -63,6 +64,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
   const [remainingShots, setRemainingShots] = useState(level.maxShots);
   const [showResult, setShowResult] = useState(false);
   const [isNewRecord, setIsNewRecord] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
 
   const resetBall = useCallback(() => {
     ballRef.current = {
@@ -75,6 +77,50 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     phaseRef.current = "aim";
     setPhase("aim");
   }, [level]);
+
+  const tutorialSteps: TutorialStep[] = [
+    {
+      id: "drag",
+      title: "拖动小球蓄力",
+      description: "按住蓝色小球并向反方向拖动，拉得越远弹射力度越大。",
+      position: "center",
+    },
+    {
+      id: "power",
+      title: "观察力度与方向",
+      description: "绿色虚线表示弹射方向，力度条会随拖动距离变化，注意控制方向和力度。",
+      position: "center",
+    },
+    {
+      id: "release",
+      title: "松手发射",
+      description: "松开手指或鼠标，小球就会朝着反方向弹射出去。",
+      position: "bottom",
+    },
+    {
+      id: "stars",
+      title: "收集星星",
+      description: "让小球经过金色星星来收集它们，收集越多星级评价越高。",
+      position: "center",
+    },
+    {
+      id: "goal",
+      title: "抵达终点",
+      description: "最终目标是让小球到达绿色终点区域，在弹射次数用完前抵达即可过关！",
+      position: "top",
+    },
+  ];
+
+  useEffect(() => {
+    if (level.id === 1 && !isTutorialCompleted()) {
+      setShowTutorial(true);
+    }
+  }, [level.id]);
+
+  const handleTutorialComplete = useCallback(() => {
+    setTutorialCompleted(true);
+    setShowTutorial(false);
+  }, []);
 
   const finishLevel = useCallback(
     (cleared: boolean) => {
@@ -442,6 +488,9 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         <span className="hud-stars">
           ★ {collected}/{level.stars.length}
         </span>
+        <button className="btn-tutorial" onClick={() => setShowTutorial(true)}>
+          ❓ 帮助
+        </button>
       </div>
       <div className="canvas-wrap">
         <canvas
@@ -521,6 +570,13 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
             </div>
           </div>
         </div>
+      )}
+      {showTutorial && (
+        <Tutorial
+          steps={tutorialSteps}
+          onClose={() => setShowTutorial(false)}
+          onComplete={handleTutorialComplete}
+        />
       )}
     </div>
   );
