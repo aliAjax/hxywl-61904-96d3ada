@@ -6,6 +6,10 @@ import Tutorial, { TutorialStep } from "./Tutorial";
 type FilterType = "all" | "notCleared" | "cleared" | "notFullStars" | "custom";
 type SortType = "id" | "stars";
 
+interface LevelDefWithCustom extends LevelDef {
+  isCustom: boolean;
+}
+
 interface Props {
   progress: Progress;
   onSelect: (levelId: number) => void;
@@ -34,6 +38,7 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
   const [filter, setFilter] = useState<FilterType>("all");
   const [sort, setSort] = useState<SortType>("id");
+  const [rulesPanelLevel, setRulesPanelLevel] = useState<LevelDefWithCustom | null>(null);
 
   let clearedCount = 0;
   let totalStars = 0;
@@ -240,6 +245,12 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
                     <span className="level-name">{lv.name}</span>
                     {StarRow(stars)}
                     {cleared && <span className="badge-cleared">已通关</span>}
+                    <button
+                      className="btn-star-rules-small"
+                      onClick={() => setRulesPanelLevel(lv)}
+                    >
+                      ⭐ 规则
+                    </button>
                     <div className="custom-level-actions">
                       <button
                         className="btn-play-small"
@@ -283,6 +294,28 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
                     <span className="level-name">{unlocked ? lv.name : "🔒"}</span>
                     {StarRow(stars)}
                     {cleared && <span className="badge-cleared">已通关</span>}
+                    {unlocked && (
+                      <span
+                        className="btn-star-rules-small"
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRulesPanelLevel(lv);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setRulesPanelLevel(lv);
+                          }
+                        }}
+                        onMouseEnter={(e) => e.stopPropagation()}
+                        onMouseLeave={(e) => e.stopPropagation()}
+                      >
+                        ⭐ 规则
+                      </span>
+                    )}
                     {unlocked && hoveredLevel?.id === lv.id && (
                       <div className="level-rules-tooltip">
                         <div className="tooltip-title">星级规则</div>
@@ -344,6 +377,58 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
           steps={tutorialSteps}
           onClose={() => setShowTutorial(false)}
         />
+      )}
+
+      {rulesPanelLevel && (
+        <div
+          className="star-rules-overlay"
+          onClick={() => setRulesPanelLevel(null)}
+        >
+          <div
+          className="star-rules-panel"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="star-rules-panel-close"
+            onClick={() => setRulesPanelLevel(null)}
+          >
+            ✕
+          </button>
+          <div className="star-rules-panel-header">
+            <div className="star-rules-panel-level">
+              {rulesPanelLevel.isCustom
+                ? `自定义 C${rulesPanelLevel.id - 1000 + 1}`
+                : `第 ${rulesPanelLevel.id} 关`}
+            </div>
+            <div className="star-rules-panel-name">{rulesPanelLevel.name}</div>
+          </div>
+          <div className="star-rules-panel-title">⭐ 星级规则</div>
+          <div className="star-rules-panel-rules">
+            {rulesPanelLevel.starRules.stars.map((rule, i) => {
+              const earnedStars = getStars(rulesPanelLevel.id, progress);
+              return (
+                <div
+                  key={i}
+                  className={
+                    "star-rules-panel-rule" + (i < earnedStars ? " achieved" : "")
+                  }
+                >
+                  <span className="star-rules-panel-star">
+                    {i < earnedStars ? "★" : "☆"}
+                  </span>
+                  <span className="star-rules-panel-desc">{rule.description}</span>
+                  {i < earnedStars && (
+                    <span className="star-rules-panel-check">✓</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="star-rules-panel-hint">
+            收集星星并在限定次数内抵达终点
+          </div>
+        </div>
+        </div>
       )}
     </div>
   );
