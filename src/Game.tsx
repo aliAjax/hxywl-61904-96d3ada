@@ -17,6 +17,8 @@ interface Ball {
   vx: number;
   vy: number;
   radius: number;
+  sx?: number;
+  sy?: number;
 }
 
 interface CollectedStar {
@@ -25,15 +27,24 @@ interface CollectedStar {
   collected: boolean;
 }
 
+interface TrailPoint {
+  x: number;
+  y: number;
+  age: number;
+}
+
 type Phase = "aim" | "fly" | "done";
 
 const BALL_R = 12;
 const GOAL_R = 24;
 const STAR_R = 16;
-const FRICTION = 0.998;
-const MIN_SPEED = 0.3;
-const MAX_DRAG = 140;
-const LAUNCH_POWER = 0.12;
+const FRICTION = 0.995;
+const MIN_SPEED = 0.25;
+const MAX_DRAG = 160;
+const LAUNCH_POWER = 0.14;
+const TRAIL_MAX = 20;
+const TRAIL_STEP = 2;
+const PREDICT_STEPS = 60;
 
 export default function Game({ level, progress, onBack, onComplete, onNext }: Props) {
   const hasNextLevel = levels.some((l) => l.id === level.id + 1);
@@ -56,6 +67,8 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
   const collectedRef = useRef(0);
   const clearedRef = useRef(false);
   const remainingShotsRef = useRef(level.maxShots);
+  const trailRef = useRef<TrailPoint[]>([]);
+  const trailCounterRef = useRef(0);
 
   const [phase, setPhase] = useState<Phase>("aim");
   const [shots, setShots] = useState(level.maxShots);
@@ -73,7 +86,11 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       vx: 0,
       vy: 0,
       radius: BALL_R,
+      sx: 1,
+      sy: 1,
     };
+    trailRef.current = [];
+    trailCounterRef.current = 0;
     phaseRef.current = "aim";
     setPhase("aim");
   }, [level]);
@@ -150,11 +167,81 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
 
+    function predictTrajectory(
+      startX: number,
+      startY: number,
+      vx: number,
+      vy: number
+    ): { x: number; y: number }[] {
+      const pts: { x: number; y: number }[] = [];
+      let px = startX;
+      let py = startY;
+      let pvx = vx;
+      let pvy = vy;
+      const r = BALL_R;
+
+      for (let i = 0; i < PREDICT_STEPS; i++) {
+        pvy += level.gravity;
+        pvx *= FRICTION;
+        pvy *= FRICTION;
+        px += pvx;
+        py += pvy;
+
+        if (px - r < 0) {
+          px = r;
+          pvx = Math.abs(pvx) * level.bounce;
+        }
+        if (px + r > CANVAS_W) {
+          px = CANVAS_W - r;
+          pvx = -Math.abs(pvx) * level.bounce;
+        }
+        if (py - r < 0) {
+          py = r;
+          pvy = Math.abs(pvy) * level.bounce;
+        }
+        if (py + r > CANVAS_H) {
+          py = CANVAS_H - r;
+          pvy = -Math.abs(pvy) * level.bounce;
+        }
+
+        let hitObstacle = false;
+        for (const ob of level.obstacles) {
+          const closestX = Math.max(ob.x, Math.min(px, ob.x + ob.w));
+          const closestY = Math.max(ob.y, Math.min(py, ob.y + ob.h));
+          const odx = px - closestX;
+          const ody = py - closestY;
+          const odist = Math.sqrt(odx * odx + ody * ody);
+          if (odist < r && odist > 0) {
+            const nx = odx / odist;
+            const ny = ody / odist;
+            px = closestX + nx * (r + 1);
+            py = closestY + ny * (r + 1);
+            const dot = pvx * nx + pvy * ny;
+            pvx = (pvx - 2 * dot * nx) * level.bounce;
+            pvy = (pvy - 2 * dot * ny) * level.bounce;
+            hitObstacle = true;
+            break;
+          }
+        }
+
+        pts.push({ x: px, y: py });
+
+        const gdx = px - level.goal.x;
+        const gdy = py - level.goal.y;
+        if (Math.sqrt(gdx * gdx + gdy * gdy) < r + GOAL_R) break;
+
+        const sp = Math.sqrt(pvx * pvx + pvy * pvy);
+        if (sp < MIN_SPEED) break;
+      }
+      return pts;
+    }
+
     function draw() {
       const b = ballRef.current;
       const stars = starsRef.current;
       const drag = dragRef.current;
       const currentPhase = phaseRef.current;
+      const trail = trailRef.current;
 
       ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
@@ -177,7 +264,10 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       }
 
       level.obstacles.forEach((ob) => {
-        ctx.fillStyle = "#475569";
+        const obGrad = ctx.createLinearGradient(ob.x, ob.y, ob.x, ob.y + ob.h);
+        obGrad.addColorStop(0, "#475569");
+        obGrad.addColorStop(1, "#334155");
+        ctx.fillStyle = obGrad;
         ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
         ctx.strokeStyle = "#64748b";
         ctx.lineWidth = 1;
@@ -209,9 +299,12 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
 
       stars.forEach((s) => {
         if (s.collected) return;
+        const t = Date.now() / 500;
+        const pulse = 1 + Math.sin(t + s.x * 0.01) * 0.08;
+        const sr = STAR_R * pulse;
         ctx.beginPath();
-        ctx.arc(s.x, s.y, STAR_R, 0, Math.PI * 2);
-        const starGrad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, STAR_R);
+        ctx.arc(s.x, s.y, sr, 0, Math.PI * 2);
+        const starGrad = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, sr);
         starGrad.addColorStop(0, "#fbbf24");
         starGrad.addColorStop(1, "rgba(251,191,36,0.15)");
         ctx.fillStyle = starGrad;
@@ -226,14 +319,39 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         ctx.fillText("★", s.x, s.y);
       });
 
+      if (currentPhase === "fly" && trail.length > 1) {
+        for (let i = 0; i < trail.length; i++) {
+          const p = trail[i];
+          const alpha = (1 - p.age / TRAIL_MAX) * 0.5;
+          const size = BALL_R * (1 - p.age / TRAIL_MAX) * 0.7 + 2;
+          if (alpha <= 0) continue;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(96, 165, 250, ${alpha})`;
+          ctx.fill();
+        }
+      }
+
+      const sx = b.sx ?? 1;
+      const sy = b.sy ?? 1;
+
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      const spd = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+      if (spd > 0.5 && currentPhase === "fly") {
+        const ang = Math.atan2(b.vy, b.vx);
+        ctx.rotate(ang);
+      }
+      ctx.scale(sx, sy);
+
       ctx.beginPath();
-      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+      ctx.arc(0, 0, b.radius, 0, Math.PI * 2);
       const ballGrad = ctx.createRadialGradient(
-        b.x - 3,
-        b.y - 3,
+        -3,
+        -3,
         2,
-        b.x,
-        b.y,
+        0,
+        0,
         b.radius
       );
       ballGrad.addColorStop(0, "#60a5fa");
@@ -244,6 +362,13 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       ctx.lineWidth = 2;
       ctx.stroke();
 
+      ctx.beginPath();
+      ctx.arc(-b.radius * 0.35, -b.radius * 0.35, b.radius * 0.28, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.fill();
+
+      ctx.restore();
+
       if (currentPhase === "aim" && drag) {
         const dx = drag.x - b.x;
         const dy = drag.y - b.y;
@@ -252,44 +377,135 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         const angle = Math.atan2(dy, dx);
         const pullX = b.x + Math.cos(angle) * clampedDist;
         const pullY = b.y + Math.sin(angle) * clampedDist;
+        const pct = clampedDist / MAX_DRAG;
 
-        ctx.beginPath();
-        ctx.moveTo(b.x, b.y);
-        ctx.lineTo(pullX, pullY);
-        ctx.strokeStyle = "rgba(239,68,68,0.6)";
-        ctx.lineWidth = 3;
-        ctx.stroke();
+        const segs = 14;
+        for (let i = 0; i < segs; i++) {
+          const t = i / segs;
+          const tt = (i + 1) / segs;
+          ctx.beginPath();
+          ctx.moveTo(
+            b.x + (pullX - b.x) * t,
+            b.y + (pullY - b.y) * t
+          );
+          ctx.lineTo(
+            b.x + (pullX - b.x) * tt,
+            b.y + (pullY - b.y) * tt
+          );
+          const a = (1 - t) * 0.7;
+          ctx.strokeStyle = `rgba(239,68,68,${a})`;
+          ctx.lineWidth = 3 - t * 2;
+          ctx.stroke();
+        }
 
         const launchAngle = angle + Math.PI;
         const power = clampedDist * LAUNCH_POWER;
-        const tipLen = Math.min(clampedDist * 0.8, 60);
+        const pvx = -Math.cos(angle) * power;
+        const pvy = -Math.sin(angle) * power;
+
+        if (clampedDist > 8) {
+          const predictPts = predictTrajectory(b.x, b.y, pvx, pvy);
+          for (let i = 0; i < predictPts.length; i += 2) {
+            const p = predictPts[i];
+            const alpha = 1 - i / predictPts.length;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 2 + alpha * 2, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(34,197,94,${alpha * 0.65})`;
+            ctx.fill();
+          }
+        }
+
+        const tipLen = Math.min(clampedDist * 0.8, 80);
         const tipX = b.x + Math.cos(launchAngle) * tipLen;
         const tipY = b.y + Math.sin(launchAngle) * tipLen;
         ctx.beginPath();
         ctx.moveTo(b.x, b.y);
         ctx.lineTo(tipX, tipY);
-        ctx.strokeStyle = "rgba(34,197,94,0.7)";
+        ctx.strokeStyle = "rgba(34,197,94,0.8)";
         ctx.lineWidth = 2.5;
         ctx.setLineDash([6, 4]);
         ctx.stroke();
         ctx.setLineDash([]);
 
+        const ah = 8;
+        const aw = 5;
         ctx.beginPath();
-        ctx.arc(tipX, tipY, 5, 0, Math.PI * 2);
+        ctx.moveTo(tipX, tipY);
+        ctx.lineTo(
+          tipX - Math.cos(launchAngle) * ah + Math.sin(launchAngle) * aw,
+          tipY - Math.sin(launchAngle) * ah - Math.cos(launchAngle) * aw
+        );
+        ctx.lineTo(
+          tipX - Math.cos(launchAngle) * ah - Math.sin(launchAngle) * aw,
+          tipY - Math.sin(launchAngle) * ah + Math.cos(launchAngle) * aw
+        );
+        ctx.closePath();
         ctx.fillStyle = "#22c55e";
         ctx.fill();
 
-        const pct = clampedDist / MAX_DRAG;
-        ctx.fillStyle = pct > 0.7 ? "#ef4444" : pct > 0.4 ? "#eab308" : "#22c55e";
+        const barW = 80;
+        const barH = 8;
+        const barX = b.x - barW / 2;
+        const barY = b.y - 42;
+
+        ctx.fillStyle = "rgba(15,23,42,0.75)";
+        ctx.strokeStyle = "rgba(148,163,184,0.3)";
+        ctx.lineWidth = 1;
+        roundRect(ctx, barX - 2, barY - 2, barW + 4, barH + 4, 5);
+        ctx.fill();
+        ctx.stroke();
+
+        const fillColor = pct > 0.7 ? "#ef4444" : pct > 0.4 ? "#eab308" : "#22c55e";
+        const grad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+        grad.addColorStop(0, pct > 0.7 ? "#22c55e" : pct > 0.4 ? "#22c55e" : "#22c55e");
+        grad.addColorStop(0.5, pct > 0.4 ? "#eab308" : "#eab308");
+        grad.addColorStop(1, "#ef4444");
+        roundRect(ctx, barX, barY, barW, barH, 3);
+        ctx.fillStyle = "rgba(148,163,184,0.15)";
+        ctx.fill();
+        roundRect(ctx, barX, barY, barW * pct, barH, 3);
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+
+        ctx.fillStyle = fillColor;
         ctx.font = "bold 13px sans-serif";
-        ctx.textAlign = "left";
+        ctx.textAlign = "center";
         ctx.textBaseline = "bottom";
         ctx.fillText(
           `力度 ${Math.round(pct * 100)}%`,
-          b.x + 20,
-          b.y - 20
+          b.x,
+          barY - 5
         );
+
+        const stretchX = 1 + pct * 0.15;
+        const stretchY = 1 - pct * 0.1;
+        b.sx = stretchX;
+        b.sy = stretchY;
+      } else {
+        b.sx = 1;
+        b.sy = 1;
       }
+    }
+
+    function roundRect(
+      c: CanvasRenderingContext2D,
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      r: number
+    ) {
+      c.beginPath();
+      c.moveTo(x + r, y);
+      c.lineTo(x + w - r, y);
+      c.quadraticCurveTo(x + w, y, x + w, y + r);
+      c.lineTo(x + w, y + h - r);
+      c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      c.lineTo(x + r, y + h);
+      c.quadraticCurveTo(x, y + h, x, y + h - r);
+      c.lineTo(x, y + r);
+      c.quadraticCurveTo(x, y, x + r, y);
+      c.closePath();
     }
 
     function simulate() {
@@ -302,21 +518,47 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       b.x += b.vx;
       b.y += b.vy;
 
+      const spd = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+      if (spd > 1) {
+        const stretch = Math.min(spd / 10, 0.35);
+        b.sx = 1 + stretch;
+        b.sy = 1 - stretch * 0.6;
+      } else {
+        b.sx = 1;
+        b.sy = 1;
+      }
+
+      trailCounterRef.current++;
+      if (trailCounterRef.current >= TRAIL_STEP) {
+        trailCounterRef.current = 0;
+        trailRef.current.unshift({ x: b.x, y: b.y, age: 0 });
+        if (trailRef.current.length > TRAIL_MAX) {
+          trailRef.current.pop();
+        }
+      }
+      trailRef.current.forEach((p) => (p.age += 1 / TRAIL_STEP));
+      trailRef.current = trailRef.current.filter((p) => p.age < TRAIL_MAX);
+
+      let bounced = false;
       if (b.x - b.radius < 0) {
         b.x = b.radius;
         b.vx = Math.abs(b.vx) * level.bounce;
+        bounced = true;
       }
       if (b.x + b.radius > CANVAS_W) {
         b.x = CANVAS_W - b.radius;
         b.vx = -Math.abs(b.vx) * level.bounce;
+        bounced = true;
       }
       if (b.y - b.radius < 0) {
         b.y = b.radius;
         b.vy = Math.abs(b.vy) * level.bounce;
+        bounced = true;
       }
       if (b.y + b.radius > CANVAS_H) {
         b.y = CANVAS_H - b.radius;
         b.vy = -Math.abs(b.vy) * level.bounce;
+        bounced = true;
       }
 
       level.obstacles.forEach((ob) => {
@@ -334,8 +576,14 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
           const dot = b.vx * nx + b.vy * ny;
           b.vx = (b.vx - 2 * dot * nx) * level.bounce;
           b.vy = (b.vy - 2 * dot * ny) * level.bounce;
+          bounced = true;
         }
       });
+
+      if (bounced) {
+        b.sx = 0.75;
+        b.sy = 1.2;
+      }
 
       starsRef.current.forEach((s) => {
         if (s.collected) return;
@@ -360,6 +608,8 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       if (speed < MIN_SPEED) {
         b.vx = 0;
         b.vy = 0;
+        b.sx = 1;
+        b.sy = 1;
         shotsRef.current--;
         setShots(shotsRef.current);
 
@@ -385,9 +635,13 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const canvasEl: HTMLCanvasElement = canvas;
+
+    const TOUCH_RADIUS = 60;
+    const MIN_LAUNCH_DIST = 8;
 
     function getPos(e: MouseEvent | TouchEvent) {
-      const rect = canvas.getBoundingClientRect();
+      const rect = canvasEl.getBoundingClientRect();
       const scaleX = CANVAS_W / rect.width;
       const scaleY = CANVAS_H / rect.height;
       if ("touches" in e) {
@@ -410,8 +664,9 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       const b = ballRef.current;
       const dx = pos.x - b.x;
       const dy = pos.y - b.y;
-      if (Math.sqrt(dx * dx + dy * dy) < 40) {
+      if (Math.sqrt(dx * dx + dy * dy) < TOUCH_RADIUS) {
         dragRef.current = pos;
+        setPhase("aim");
       }
     }
 
@@ -430,31 +685,43 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       const dist = Math.sqrt(dx * dx + dy * dy);
       const clamped = Math.min(dist, MAX_DRAG);
 
-      if (clamped > 10) {
+      if (clamped > MIN_LAUNCH_DIST) {
         const angle = Math.atan2(dy, dx);
         const power = clamped * LAUNCH_POWER;
         b.vx = -Math.cos(angle) * power;
         b.vy = -Math.sin(angle) * power;
+        b.sx = 1.4;
+        b.sy = 0.7;
         phaseRef.current = "fly";
         setPhase("fly");
       }
       dragRef.current = null;
     }
 
-    canvas.addEventListener("mousedown", onDown);
-    canvas.addEventListener("mousemove", onMove);
-    canvas.addEventListener("mouseup", onUp);
-    canvas.addEventListener("touchstart", onDown, { passive: false });
-    canvas.addEventListener("touchmove", onMove, { passive: false });
-    canvas.addEventListener("touchend", onUp, { passive: false });
+    function onLeave(_e: MouseEvent | TouchEvent) {
+      if (!dragRef.current) return;
+      if (phaseRef.current !== "aim") return;
+      onUp(_e);
+    }
+
+    canvasEl.addEventListener("mousedown", onDown);
+    canvasEl.addEventListener("mousemove", onMove);
+    canvasEl.addEventListener("mouseup", onUp);
+    canvasEl.addEventListener("mouseleave", onLeave);
+    canvasEl.addEventListener("touchstart", onDown, { passive: false });
+    canvasEl.addEventListener("touchmove", onMove, { passive: false });
+    canvasEl.addEventListener("touchend", onUp, { passive: false });
+    canvasEl.addEventListener("touchcancel", onUp, { passive: false });
 
     return () => {
-      canvas.removeEventListener("mousedown", onDown);
-      canvas.removeEventListener("mousemove", onMove);
-      canvas.removeEventListener("mouseup", onUp);
-      canvas.removeEventListener("touchstart", onDown);
-      canvas.removeEventListener("touchmove", onMove);
-      canvas.removeEventListener("touchend", onUp);
+      canvasEl.removeEventListener("mousedown", onDown);
+      canvasEl.removeEventListener("mousemove", onMove);
+      canvasEl.removeEventListener("mouseup", onUp);
+      canvasEl.removeEventListener("mouseleave", onLeave);
+      canvasEl.removeEventListener("touchstart", onDown);
+      canvasEl.removeEventListener("touchmove", onMove);
+      canvasEl.removeEventListener("touchend", onUp);
+      canvasEl.removeEventListener("touchcancel", onUp);
     };
   }, []);
 
