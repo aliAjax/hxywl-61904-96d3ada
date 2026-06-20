@@ -8,7 +8,7 @@ export interface ObstacleDef {
   y: number;
   w: number;
   h: number;
-  type?: "wall" | "bumper";
+  type?: "wall" | "oneTime" | "slowZone";
 }
 
 export interface StarRules {
@@ -343,6 +343,96 @@ export const levels: LevelDef[] = [
         { description: "抵达终点", minCollected: 0 },
         { description: "收集 5 颗星星", minCollected: 5 },
         { description: "4 次内通关并收集全部", maxShotsUsed: 4, minCollected: 6 },
+      ],
+    },
+  },
+  {
+    id: 11,
+    name: "易碎通道",
+    ball: { x: 80, y: 420 },
+    goal: { x: 720, y: 80 },
+    stars: [
+      { x: 220, y: 320 },
+      { x: 400, y: 220 },
+      { x: 580, y: 140 },
+      { x: 350, y: 380 },
+    ],
+    obstacles: [
+      { x: 150, y: 370, w: 100, h: 14, type: "oneTime" },
+      { x: 300, y: 280, w: 100, h: 14, type: "oneTime" },
+      { x: 450, y: 200, w: 100, h: 14, type: "oneTime" },
+      { x: 600, y: 120, w: 100, h: 14, type: "wall" },
+      { x: 250, y: 350, w: 16, h: 140, type: "wall" },
+      { x: 500, y: 220, w: 16, h: 160, type: "wall" },
+    ],
+    maxShots: 4,
+    gravity: 0.18,
+    bounce: 0.68,
+    starRules: {
+      stars: [
+        { description: "抵达终点", minCollected: 0 },
+        { description: "收集 3 颗星星", minCollected: 3 },
+        { description: "2 次内通关并收集全部", maxShotsUsed: 2, minCollected: 4 },
+      ],
+    },
+  },
+  {
+    id: 12,
+    name: "能量沼泽",
+    ball: { x: 80, y: 80 },
+    goal: { x: 720, y: 420 },
+    stars: [
+      { x: 250, y: 150 },
+      { x: 450, y: 250 },
+      { x: 600, y: 350 },
+      { x: 300, y: 380 },
+    ],
+    obstacles: [
+      { x: 150, y: 180, w: 200, h: 120, type: "slowZone" },
+      { x: 400, y: 280, w: 200, h: 120, type: "slowZone" },
+      { x: 300, y: 100, w: 14, h: 300, type: "wall" },
+      { x: 550, y: 180, w: 14, h: 300, type: "wall" },
+    ],
+    maxShots: 5,
+    gravity: 0.2,
+    bounce: 0.7,
+    starRules: {
+      stars: [
+        { description: "抵达终点", minCollected: 0 },
+        { description: "收集 3 颗星星", minCollected: 3 },
+        { description: "3 次内通关并收集全部", maxShotsUsed: 3, minCollected: 4 },
+      ],
+    },
+  },
+  {
+    id: 13,
+    name: "综合试炼",
+    ball: { x: 80, y: 420 },
+    goal: { x: 720, y: 80 },
+    stars: [
+      { x: 200, y: 300 },
+      { x: 400, y: 180 },
+      { x: 600, y: 280 },
+      { x: 300, y: 100 },
+      { x: 550, y: 420 },
+    ],
+    obstacles: [
+      { x: 150, y: 340, w: 80, h: 14, type: "oneTime" },
+      { x: 350, y: 230, w: 80, h: 14, type: "oneTime" },
+      { x: 250, y: 200, w: 150, h: 100, type: "slowZone" },
+      { x: 500, y: 320, w: 150, h: 100, type: "slowZone" },
+      { x: 200, y: 140, w: 14, h: 180, type: "wall" },
+      { x: 450, y: 100, w: 14, h: 160, type: "wall" },
+      { x: 600, y: 180, w: 14, h: 180, type: "wall" },
+    ],
+    maxShots: 5,
+    gravity: 0.18,
+    bounce: 0.68,
+    starRules: {
+      stars: [
+        { description: "抵达终点", minCollected: 0 },
+        { description: "收集 4 颗星星", minCollected: 4 },
+        { description: "3 次内通关并收集全部", maxShotsUsed: 3, minCollected: 5 },
       ],
     },
   },

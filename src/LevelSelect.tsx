@@ -63,6 +63,12 @@ export default function LevelSelect({ progress, onSelect }: Props) {
       position: "center",
     },
     {
+      id: "walls",
+      title: "认识障碍物",
+      description: "灰色墙体：普通反弹；橙色方块：碰撞后消失；紫色区域：会让小球减速。",
+      position: "center",
+    },
+    {
       id: "goal",
       title: "抵达终点",
       description: "最终目标是让小球到达绿色终点区域，在弹射次数用完前抵达即可过关！",

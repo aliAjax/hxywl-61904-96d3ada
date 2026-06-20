@@ -25,6 +25,7 @@ interface CollectedStar {
   x: number;
   y: number;
   collected: boolean;
+  collectAnim?: number;
 }
 
 interface TrailPoint {
@@ -33,12 +34,37 @@ interface TrailPoint {
   age: number;
 }
 
+interface ObstacleState {
+  destroyed: boolean;
+  destroyAnim?: number;
+}
+
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+  size: number;
+  color: string;
+  type: "collision" | "star" | "goal" | "destroy" | "slow";
+}
+
+interface ScreenShake {
+  x: number;
+  y: number;
+  intensity: number;
+  duration: number;
+}
+
 type Phase = "aim" | "fly" | "done";
 
 const BALL_R = 12;
 const GOAL_R = 24;
 const STAR_R = 16;
 const FRICTION = 0.995;
+const SLOW_ZONE_FRICTION = 0.96;
 const MIN_SPEED = 0.25;
 const MAX_DRAG = 160;
 const LAUNCH_POWER = 0.14;
@@ -70,6 +96,12 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
   const remainingShotsRef = useRef(level.maxShots);
   const trailRef = useRef<TrailPoint[]>([]);
   const trailCounterRef = useRef(0);
+  const obstacleStatesRef = useRef<ObstacleState[]>(
+    level.obstacles.map(() => ({ destroyed: false }))
+  );
+  const particlesRef = useRef<Particle[]>([]);
+  const screenShakeRef = useRef<ScreenShake>({ x: 0, y: 0, intensity: 0, duration: 0 });
+  const goalAnimRef = useRef(0);
 
   const [phase, setPhase] = useState<Phase>("aim");
   const [shots, setShots] = useState(level.maxShots);
@@ -95,6 +127,9 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     trailCounterRef.current = 0;
     phaseRef.current = "aim";
     setPhase("aim");
+    particlesRef.current = particlesRef.current.filter(
+      (p) => p.type === "star" || p.type === "destroy"
+    );
   }, [level]);
 
   const tutorialSteps: TutorialStep[] = [
@@ -123,12 +158,25 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       position: "center",
     },
     {
+      id: "walls",
+      title: "认识障碍物",
+      description: "灰色墙体：普通反弹；橙色方块：碰撞后消失；紫色区域：会让小球减速。",
+      position: "center",
+    },
+    {
       id: "goal",
       title: "抵达终点",
       description: "最终目标是让小球到达绿色终点区域，在弹射次数用完前抵达即可过关！",
       position: "top",
     },
   ];
+
+  useEffect(() => {
+    obstacleStatesRef.current = level.obstacles.map(() => ({ destroyed: false }));
+    particlesRef.current = [];
+    screenShakeRef.current = { x: 0, y: 0, intensity: 0, duration: 0 };
+    goalAnimRef.current = 0;
+  }, [level.id]);
 
   useEffect(() => {
     if (level.id === 1 && !isTutorialCompleted()) {
@@ -168,6 +216,98 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
 
+    function spawnParticles(
+      x: number,
+      y: number,
+      count: number,
+      type: Particle["type"],
+      baseColor?: string
+    ) {
+      const colorMap: Record<Particle["type"], string> = {
+        collision: baseColor || "#94a3b8",
+        star: "#fbbf24",
+        goal: "#22c55e",
+        destroy: "#f97316",
+        slow: "#a78bfa",
+      };
+      const color = colorMap[type];
+      const sizeMap: Record<Particle["type"], [number, number]> = {
+        collision: [2, 5],
+        star: [3, 7],
+        goal: [4, 8],
+        destroy: [3, 6],
+        slow: [2, 4],
+      };
+      const [minSize, maxSize] = sizeMap[type];
+      const lifeMap: Record<Particle["type"], [number, number]> = {
+        collision: [15, 30],
+        star: [25, 45],
+        goal: [40, 70],
+        destroy: [20, 40],
+        slow: [10, 20],
+      };
+      const [minLife, maxLife] = lifeMap[type];
+      const speedMap: Record<Particle["type"], number> = {
+        collision: 3,
+        star: 5,
+        goal: 6,
+        destroy: 4,
+        slow: 1.5,
+      };
+      const speed = speedMap[type];
+
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const spd = Math.random() * speed + speed * 0.3;
+        particlesRef.current.push({
+          x,
+          y,
+          vx: Math.cos(angle) * spd,
+          vy: Math.sin(angle) * spd - (type === "star" || type === "goal" ? 1 : 0),
+          life: Math.floor(Math.random() * (maxLife - minLife) + minLife),
+          maxLife: maxLife,
+          size: Math.random() * (maxSize - minSize) + minSize,
+          color,
+          type,
+        });
+      }
+    }
+
+    function triggerShake(intensity: number, duration: number) {
+      screenShakeRef.current.intensity = intensity;
+      screenShakeRef.current.duration = duration;
+    }
+
+    function updateShake() {
+      const s = screenShakeRef.current;
+      if (s.duration > 0) {
+        s.x = (Math.random() - 0.5) * s.intensity * 2;
+        s.y = (Math.random() - 0.5) * s.intensity * 2;
+        s.duration--;
+        s.intensity *= 0.92;
+      } else {
+        s.x = 0;
+        s.y = 0;
+        s.intensity = 0;
+      }
+    }
+
+    function updateParticles() {
+      const particles = particlesRef.current;
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += p.type === "goal" || p.type === "star" ? -0.05 : 0.1;
+        p.vx *= 0.98;
+        p.vy *= 0.98;
+        p.life--;
+        if (p.life <= 0) {
+          particles.splice(i, 1);
+        }
+      }
+    }
+
     function predictTrajectory(
       startX: number,
       startY: number,
@@ -183,8 +323,26 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
 
       for (let i = 0; i < PREDICT_STEPS; i++) {
         pvy += level.gravity;
-        pvx *= FRICTION;
-        pvy *= FRICTION;
+
+        let inSlowZone = false;
+        level.obstacles.forEach((ob, idx) => {
+          const obState = obstacleStatesRef.current[idx];
+          if (obState?.destroyed) return;
+          if (ob.type === "slowZone") {
+            if (
+              px + r > ob.x &&
+              px - r < ob.x + ob.w &&
+              py + r > ob.y &&
+              py - r < ob.y + ob.h
+            ) {
+              inSlowZone = true;
+            }
+          }
+        });
+
+        const friction = inSlowZone ? SLOW_ZONE_FRICTION : FRICTION;
+        pvx *= friction;
+        pvy *= friction;
         px += pvx;
         py += pvy;
 
@@ -206,7 +364,12 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         }
 
         let hitObstacle = false;
-        for (const ob of level.obstacles) {
+        level.obstacles.forEach((ob, idx) => {
+          if (hitObstacle) return;
+          const obState = obstacleStatesRef.current[idx];
+          if (obState?.destroyed) return;
+          if (ob.type === "slowZone") return;
+
           const closestX = Math.max(ob.x, Math.min(px, ob.x + ob.w));
           const closestY = Math.max(ob.y, Math.min(py, ob.y + ob.h));
           const odx = px - closestX;
@@ -221,9 +384,8 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
             pvx = (pvx - 2 * dot * nx) * level.bounce;
             pvy = (pvy - 2 * dot * ny) * level.bounce;
             hitObstacle = true;
-            break;
           }
-        }
+        });
 
         pts.push({ x: px, y: py });
 
@@ -243,11 +405,15 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       const drag = dragRef.current;
       const currentPhase = phaseRef.current;
       const trail = trailRef.current;
+      const shake = screenShakeRef.current;
 
+      ctx.save();
       ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
       ctx.fillStyle = "#0f172a";
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+      ctx.translate(shake.x, shake.y);
 
       ctx.strokeStyle = "rgba(148,163,184,0.12)";
       ctx.lineWidth = 1;
@@ -264,26 +430,150 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         ctx.stroke();
       }
 
-      level.obstacles.forEach((ob) => {
-        const obGrad = ctx.createLinearGradient(ob.x, ob.y, ob.x, ob.y + ob.h);
-        obGrad.addColorStop(0, "#475569");
-        obGrad.addColorStop(1, "#334155");
-        ctx.fillStyle = obGrad;
-        ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
-        ctx.strokeStyle = "#64748b";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(ob.x, ob.y, ob.w, ob.h);
+      level.obstacles.forEach((ob, idx) => {
+        const obState = obstacleStatesRef.current[idx];
+        if (obState?.destroyed) {
+          if (obState.destroyAnim !== undefined && obState.destroyAnim > 0) {
+            const alpha = obState.destroyAnim / 30;
+            const expand = (30 - obState.destroyAnim) * 2;
+            ctx.globalAlpha = alpha;
+            ctx.strokeStyle = "#f97316";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(
+              ob.x - expand,
+              ob.y - expand,
+              ob.w + expand * 2,
+              ob.h + expand * 2
+            );
+            ctx.globalAlpha = 1;
+          }
+          return;
+        }
+
+        const type = ob.type || "wall";
+        if (type === "wall") {
+          const obGrad = ctx.createLinearGradient(ob.x, ob.y, ob.x, ob.y + ob.h);
+          obGrad.addColorStop(0, "#475569");
+          obGrad.addColorStop(1, "#334155");
+          ctx.fillStyle = obGrad;
+          ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.strokeStyle = "#64748b";
+          ctx.lineWidth = 1;
+          ctx.strokeRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.strokeStyle = "rgba(148,163,184,0.15)";
+          ctx.lineWidth = 1;
+          const stripeDir = ob.w > ob.h ? "h" : "v";
+          if (stripeDir === "h") {
+            for (let sy = ob.y + 4; sy < ob.y + ob.h; sy += 6) {
+              ctx.beginPath();
+              ctx.moveTo(ob.x + 2, sy);
+              ctx.lineTo(ob.x + ob.w - 2, sy);
+              ctx.stroke();
+            }
+          } else {
+            for (let sx = ob.x + 4; sx < ob.x + ob.w; sx += 6) {
+              ctx.beginPath();
+              ctx.moveTo(sx, ob.y + 2);
+              ctx.lineTo(sx, ob.y + ob.h - 2);
+              ctx.stroke();
+            }
+          }
+        } else if (type === "oneTime") {
+          const t = Date.now() / 300;
+          const pulse = 1 + Math.sin(t + idx) * 0.04;
+          const ow = ob.w * pulse;
+          const oh = ob.h * pulse;
+          const ox = ob.x + (ob.w - ow) / 2;
+          const oy = ob.y + (ob.h - oh) / 2;
+
+          const obGrad = ctx.createLinearGradient(ox, oy, ox, oy + oh);
+          obGrad.addColorStop(0, "#fb923c");
+          obGrad.addColorStop(0.5, "#f97316");
+          obGrad.addColorStop(1, "#ea580c");
+          ctx.fillStyle = obGrad;
+          roundRect(ctx, ox, oy, ow, oh, 3);
+          ctx.fill();
+          ctx.strokeStyle = "#fdba74";
+          ctx.lineWidth = 1.5;
+          roundRect(ctx, ox, oy, ow, oh, 3);
+          ctx.stroke();
+
+          ctx.fillStyle = "rgba(255,255,255,0.6)";
+          ctx.font = "bold 10px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("⚠", ob.x + ob.w / 2, ob.y + ob.h / 2);
+        } else if (type === "slowZone") {
+          const t = Date.now() / 600;
+          ctx.save();
+          ctx.globalAlpha = 0.35 + Math.sin(t + idx * 0.5) * 0.1;
+          const obGrad = ctx.createRadialGradient(
+            ob.x + ob.w / 2,
+            ob.y + ob.h / 2,
+            0,
+            ob.x + ob.w / 2,
+            ob.y + ob.h / 2,
+            Math.max(ob.w, ob.h) / 1.5
+          );
+          obGrad.addColorStop(0, "#a78bfa");
+          obGrad.addColorStop(0.6, "#8b5cf6");
+          obGrad.addColorStop(1, "rgba(139,92,246,0)");
+          ctx.fillStyle = obGrad;
+          ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.restore();
+
+          ctx.save();
+          ctx.strokeStyle = "rgba(167,139,250,0.5)";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([6, 4]);
+          ctx.strokeRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.setLineDash([]);
+          ctx.restore();
+
+          ctx.save();
+          ctx.globalAlpha = 0.4 + Math.sin(t * 2 + idx) * 0.2;
+          for (let pi = 0; pi < 5; pi++) {
+            const px = ob.x + ((pi * 37 + Date.now() / 20) % ob.w);
+            const py = ob.y + ((pi * 53 + Date.now() / 25) % ob.h);
+            ctx.beginPath();
+            ctx.arc(px, py, 2, 0, Math.PI * 2);
+            ctx.fillStyle = "#c4b5fd";
+            ctx.fill();
+          }
+          ctx.restore();
+
+          ctx.fillStyle = "rgba(196,181,253,0.7)";
+          ctx.font = "bold 12px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("❄", ob.x + ob.w / 2, ob.y + ob.h / 2);
+        }
       });
 
+      const goalAnim = goalAnimRef.current;
+      const goalPulse = 1 + Math.sin(Date.now() / 400) * 0.08 + goalAnim * 0.02;
+      const goalR = GOAL_R * goalPulse;
+
+      if (goalAnim > 0) {
+        ctx.save();
+        ctx.globalAlpha = goalAnim / 60;
+        ctx.beginPath();
+        ctx.arc(level.goal.x, level.goal.y, goalR + (60 - goalAnim) * 2, 0, Math.PI * 2);
+        ctx.strokeStyle = "#22c55e";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.restore();
+      }
+
       ctx.beginPath();
-      ctx.arc(level.goal.x, level.goal.y, GOAL_R, 0, Math.PI * 2);
+      ctx.arc(level.goal.x, level.goal.y, goalR, 0, Math.PI * 2);
       const goalGrad = ctx.createRadialGradient(
         level.goal.x,
         level.goal.y,
         0,
         level.goal.x,
         level.goal.y,
-        GOAL_R
+        goalR
       );
       goalGrad.addColorStop(0, "#22c55e");
       goalGrad.addColorStop(1, "rgba(34,197,94,0.2)");
@@ -299,7 +589,29 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       ctx.fillText("终", level.goal.x, level.goal.y);
 
       stars.forEach((s) => {
-        if (s.collected) return;
+        if (s.collected) {
+          if (s.collectAnim !== undefined && s.collectAnim > 0) {
+            const animPct = s.collectAnim / 30;
+            const expandR = STAR_R + (30 - s.collectAnim) * 1.5;
+            ctx.save();
+            ctx.globalAlpha = animPct;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, expandR, 0, Math.PI * 2);
+            ctx.strokeStyle = "#fbbf24";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.restore();
+            ctx.save();
+            ctx.globalAlpha = animPct * 0.8;
+            ctx.fillStyle = "#fbbf24";
+            ctx.font = `bold ${16 + (30 - s.collectAnim) * 0.5}px sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("+1", s.x, s.y - (30 - s.collectAnim) * 1.2);
+            ctx.restore();
+          }
+          return;
+        }
         const t = Date.now() / 500;
         const pulse = 1 + Math.sin(t + s.x * 0.01) * 0.08;
         const sr = STAR_R * pulse;
@@ -486,6 +798,28 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         b.sx = 1;
         b.sy = 1;
       }
+
+      particlesRef.current.forEach((p) => {
+        const alpha = p.life / p.maxLife;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, alpha);
+        if (p.type === "goal" || p.type === "star") {
+          const glowGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 2);
+          glowGrad.addColorStop(0, p.color);
+          glowGrad.addColorStop(1, "transparent");
+          ctx.fillStyle = glowGrad;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+
+      ctx.restore();
     }
 
     function roundRect(
@@ -511,11 +845,50 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
 
     function simulate() {
       const b = ballRef.current;
+
+      obstacleStatesRef.current.forEach((os) => {
+        if (os.destroyAnim !== undefined && os.destroyAnim > 0) {
+          os.destroyAnim--;
+        }
+      });
+      starsRef.current.forEach((s) => {
+        if (s.collectAnim !== undefined && s.collectAnim > 0) {
+          s.collectAnim--;
+        }
+      });
+      if (goalAnimRef.current > 0) {
+        goalAnimRef.current--;
+      }
+
+      updateParticles();
+      updateShake();
+
       if (phaseRef.current !== "fly") return;
 
+      let inSlowZone = false;
+      level.obstacles.forEach((ob, idx) => {
+        const obState = obstacleStatesRef.current[idx];
+        if (obState?.destroyed) return;
+        if (ob.type === "slowZone") {
+          if (
+            b.x + b.radius > ob.x &&
+            b.x - b.radius < ob.x + ob.w &&
+            b.y + b.radius > ob.y &&
+            b.y - b.radius < ob.y + ob.h
+          ) {
+            inSlowZone = true;
+            if (Math.random() < 0.3) {
+              spawnParticles(b.x, b.y, 1, "slow");
+            }
+          }
+        }
+      });
+
+      const currentFriction = inSlowZone ? SLOW_ZONE_FRICTION : FRICTION;
+
       b.vy += level.gravity;
-      b.vx *= FRICTION;
-      b.vy *= FRICTION;
+      b.vx *= currentFriction;
+      b.vy *= currentFriction;
       b.x += b.vx;
       b.y += b.vy;
 
@@ -541,28 +914,41 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       trailRef.current = trailRef.current.filter((p) => p.age < TRAIL_MAX);
 
       let bounced = false;
+      let bounceSpeed = 0;
       if (b.x - b.radius < 0) {
         b.x = b.radius;
+        bounceSpeed = Math.max(bounceSpeed, Math.abs(b.vx));
         b.vx = Math.abs(b.vx) * level.bounce;
         bounced = true;
       }
       if (b.x + b.radius > CANVAS_W) {
         b.x = CANVAS_W - b.radius;
+        bounceSpeed = Math.max(bounceSpeed, Math.abs(b.vx));
         b.vx = -Math.abs(b.vx) * level.bounce;
         bounced = true;
       }
       if (b.y - b.radius < 0) {
         b.y = b.radius;
+        bounceSpeed = Math.max(bounceSpeed, Math.abs(b.vy));
         b.vy = Math.abs(b.vy) * level.bounce;
         bounced = true;
       }
       if (b.y + b.radius > CANVAS_H) {
         b.y = CANVAS_H - b.radius;
+        bounceSpeed = Math.max(bounceSpeed, Math.abs(b.vy));
         b.vy = -Math.abs(b.vy) * level.bounce;
         bounced = true;
       }
+      if (bounced && bounceSpeed > 1) {
+        spawnParticles(b.x, b.y, Math.min(Math.floor(bounceSpeed * 2), 8), "collision", "#64748b");
+        triggerShake(Math.min(bounceSpeed * 0.3, 4), Math.min(Math.floor(bounceSpeed * 3), 12));
+      }
 
-      level.obstacles.forEach((ob) => {
+      level.obstacles.forEach((ob, idx) => {
+        const obState = obstacleStatesRef.current[idx];
+        if (obState?.destroyed) return;
+        if (ob.type === "slowZone") return;
+
         const closestX = Math.max(ob.x, Math.min(b.x, ob.x + ob.w));
         const closestY = Math.max(ob.y, Math.min(b.y, ob.y + ob.h));
         const dx = b.x - closestX;
@@ -572,11 +958,29 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         if (dist < b.radius && dist > 0) {
           const nx = dx / dist;
           const ny = dy / dist;
-          b.x = closestX + nx * (b.radius + 1);
-          b.y = closestY + ny * (b.radius + 1);
-          const dot = b.vx * nx + b.vy * ny;
-          b.vx = (b.vx - 2 * dot * nx) * level.bounce;
-          b.vy = (b.vy - 2 * dot * ny) * level.bounce;
+          const impactSpeed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+
+          if (ob.type === "oneTime") {
+            obstacleStatesRef.current[idx] = { destroyed: true, destroyAnim: 30 };
+            spawnParticles(ob.x + ob.w / 2, ob.y + ob.h / 2, 18, "destroy");
+            spawnParticles(closestX, closestY, 10, "collision", "#fb923c");
+            triggerShake(Math.min(impactSpeed * 0.5, 6), 18);
+            b.x = closestX + nx * (b.radius + 1);
+            b.y = closestY + ny * (b.radius + 1);
+            const dot = b.vx * nx + b.vy * ny;
+            b.vx = (b.vx - 2 * dot * nx) * level.bounce * 0.85;
+            b.vy = (b.vy - 2 * dot * ny) * level.bounce * 0.85;
+          } else {
+            b.x = closestX + nx * (b.radius + 1);
+            b.y = closestY + ny * (b.radius + 1);
+            const dot = b.vx * nx + b.vy * ny;
+            b.vx = (b.vx - 2 * dot * nx) * level.bounce;
+            b.vy = (b.vy - 2 * dot * ny) * level.bounce;
+            if (impactSpeed > 0.8) {
+              spawnParticles(closestX, closestY, Math.min(Math.floor(impactSpeed * 1.5), 6), "collision", "#94a3b8");
+              triggerShake(Math.min(impactSpeed * 0.2, 3), Math.min(Math.floor(impactSpeed * 2), 8));
+            }
+          }
           bounced = true;
         }
       });
@@ -592,8 +996,11 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         const dy = b.y - s.y;
         if (Math.sqrt(dx * dx + dy * dy) < b.radius + STAR_R) {
           s.collected = true;
+          s.collectAnim = 30;
           collectedRef.current++;
           setCollected(collectedRef.current);
+          spawnParticles(s.x, s.y, 16, "star");
+          triggerShake(2, 8);
         }
       });
 
@@ -602,6 +1009,9 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       if (Math.sqrt(gdx * gdx + gdy * gdy) < b.radius + GOAL_R) {
         shotsUsedRef.current++;
         clearedRef.current = true;
+        goalAnimRef.current = 60;
+        spawnParticles(level.goal.x, level.goal.y, 35, "goal");
+        triggerShake(5, 25);
         finishLevel(true);
         return;
       }
@@ -736,6 +1146,10 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     shotsUsedRef.current = 0;
     remainingShotsRef.current = level.maxShots;
     dragRef.current = null;
+    obstacleStatesRef.current = level.obstacles.map(() => ({ destroyed: false }));
+    particlesRef.current = [];
+    screenShakeRef.current = { x: 0, y: 0, intensity: 0, duration: 0 };
+    goalAnimRef.current = 0;
     setShots(level.maxShots);
     setCollected(0);
     setResultStars(0);
