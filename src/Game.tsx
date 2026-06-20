@@ -116,6 +116,8 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
   const [isNewRecord, setIsNewRecord] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const [showStarRules, setShowStarRules] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
 
   const resetBall = useCallback(() => {
     ballRef.current = {
@@ -858,6 +860,8 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     }
 
     function simulate() {
+      if (isPausedRef.current) return;
+
       const b = ballRef.current;
 
       obstacleStatesRef.current.forEach((os) => {
@@ -1086,6 +1090,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
 
     function onDown(e: MouseEvent | TouchEvent) {
       if (phaseRef.current !== "aim") return;
+      if (isPausedRef.current) return;
       e.preventDefault();
       const pos = getPos(e);
       const b = ballRef.current;
@@ -1164,14 +1169,40 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     particlesRef.current = [];
     screenShakeRef.current = { x: 0, y: 0, intensity: 0, duration: 0 };
     goalAnimRef.current = 0;
+    isPausedRef.current = false;
     setShots(level.maxShots);
     setCollected(0);
     setResultStars(0);
     setRemainingShots(level.maxShots);
     setIsNewRecord(false);
     setShowResult(false);
+    setIsPaused(false);
     resetBall();
   }
+
+  const handlePause = useCallback(() => {
+    if (showResult) return;
+    isPausedRef.current = true;
+    setIsPaused(true);
+    dragRef.current = null;
+  }, [showResult]);
+
+  const handleResume = useCallback(() => {
+    isPausedRef.current = false;
+    setIsPaused(false);
+  }, []);
+
+  const handlePauseRetry = useCallback(() => {
+    isPausedRef.current = false;
+    setIsPaused(false);
+    handleRetry();
+  }, []);
+
+  const handlePauseBack = useCallback(() => {
+    isPausedRef.current = false;
+    setIsPaused(false);
+    onBack();
+  }, [onBack]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1180,6 +1211,22 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     canvas.width = Math.floor(viewport.canvasWidth * dpr);
     canvas.height = Math.floor(viewport.canvasHeight * dpr);
   }, [viewport.canvasWidth, viewport.canvasHeight]);
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (showTutorial || showStarRules) return;
+        if (showResult) return;
+        if (isPaused) {
+          handleResume();
+        } else {
+          handlePause();
+        }
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [isPaused, showResult, showTutorial, showStarRules, handlePause, handleResume]);
 
   return (
     <div className={`game-view ${viewport.isLandscape ? "landscape" : "portrait"}`}>
@@ -1208,6 +1255,11 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         >
           ❓ 帮助
         </button>
+        {!showResult && (
+          <button className="btn-pause" onClick={isPaused ? handleResume : handlePause}>
+            {isPaused ? "▶️ 继续" : "⏸ 暂停"}
+          </button>
+        )}
       </div>
       <div ref={viewport.containerRef} className="canvas-wrap">
         <canvas
@@ -1283,6 +1335,45 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
                 返回选关
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {isPaused && !showResult && (
+        <div className="pause-overlay">
+          <div className="pause-card">
+            <h3 className="pause-title">⏸ 游戏暂停</h3>
+            <div className="pause-stats">
+              <div className="pause-stat-item">
+                <span className="pause-stat-label">当前关卡</span>
+                <span className="pause-stat-value">
+                  第 {level.id} 关</span>
+              </div>
+              <div className="pause-stat-item">
+                <span className="pause-stat-label">收集星星</span>
+                <span className="pause-stat-value">
+                  <span className="star-icon">★</span>
+                  {collected} / {level.stars.length}
+                </span>
+              </div>
+              <div className="pause-stat-item">
+                <span className="pause-stat-label">剩余弹射</span>
+                <span className="pause-stat-value shots-value">
+                  {shots} / {level.maxShots}
+                </span>
+              </div>
+            </div>
+            <div className="pause-actions">
+              <button className="btn-pause-resume" onClick={handleResume}>
+                ▶️ 继续游戏
+              </button>
+              <button className="btn-pause-retry" onClick={handlePauseRetry}>
+                🔄 重新挑战
+              </button>
+              <button className="btn-pause-back" onClick={handlePauseBack}>
+                🏠 返回选关
+              </button>
+            </div>
+            <div className="pause-hint">按 ESC 键可快速暂停/继续</div>
           </div>
         </div>
       )}
