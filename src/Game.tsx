@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { LevelDef, CANVAS_W, CANVAS_H, levels } from "./levels";
+import { LevelDef, CANVAS_W, CANVAS_H, levels, calculateEarnedStars } from "./levels";
 import { Progress, getStars, isTutorialCompleted, setTutorialCompleted } from "./progress";
 import Tutorial, { TutorialStep } from "./Tutorial";
 
@@ -64,6 +64,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const phaseRef = useRef<Phase>("aim");
   const shotsRef = useRef(level.maxShots);
+  const shotsUsedRef = useRef(0);
   const collectedRef = useRef(0);
   const clearedRef = useRef(false);
   const remainingShotsRef = useRef(level.maxShots);
@@ -78,6 +79,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
   const [showResult, setShowResult] = useState(false);
   const [isNewRecord, setIsNewRecord] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
+  const [showStarRules, setShowStarRules] = useState(false);
 
   const resetBall = useCallback(() => {
     ballRef.current = {
@@ -143,17 +145,16 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     (cleared: boolean) => {
       phaseRef.current = "done";
       setPhase("done");
-      const totalStars = level.stars.length;
-      const earnedStars = cleared
-        ? collectedRef.current === totalStars
-          ? 3
-          : collectedRef.current >= totalStars / 2
-            ? 2
-            : 1
-        : 0;
       const remaining = shotsRef.current;
       remainingShotsRef.current = remaining;
       setRemainingShots(remaining);
+      const earnedStars = calculateEarnedStars(
+        level,
+        collectedRef.current,
+        shotsUsedRef.current,
+        remaining,
+        cleared
+      );
       setResultStars(earnedStars);
       setIsNewRecord(earnedStars > prevBestStars);
       setShowResult(true);
@@ -599,6 +600,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       const gdx = b.x - level.goal.x;
       const gdy = b.y - level.goal.y;
       if (Math.sqrt(gdx * gdx + gdy * gdy) < b.radius + GOAL_R) {
+        shotsUsedRef.current++;
         clearedRef.current = true;
         finishLevel(true);
         return;
@@ -611,6 +613,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         b.sx = 1;
         b.sy = 1;
         shotsRef.current--;
+        shotsUsedRef.current++;
         setShots(shotsRef.current);
 
         if (shotsRef.current <= 0) {
@@ -730,7 +733,9 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     collectedRef.current = 0;
     clearedRef.current = false;
     shotsRef.current = level.maxShots;
+    shotsUsedRef.current = 0;
     remainingShotsRef.current = level.maxShots;
+    dragRef.current = null;
     setShots(level.maxShots);
     setCollected(0);
     setResultStars(0);
@@ -755,6 +760,14 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         <span className="hud-stars">
           ★ {collected}/{level.stars.length}
         </span>
+        <button
+          className="btn-star-rules"
+          onClick={() => setShowStarRules(true)}
+          onMouseEnter={() => setShowStarRules(true)}
+          onMouseLeave={() => setShowStarRules(false)}
+        >
+          ⭐ 星级规则
+        </button>
         <button className="btn-tutorial" onClick={() => setShowTutorial(true)}>
           ❓ 帮助
         </button>
@@ -844,6 +857,23 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
           onClose={handleTutorialClose}
           onComplete={handleTutorialClose}
         />
+      )}
+      {showStarRules && (
+        <div
+          className="star-rules-popup"
+          onMouseEnter={() => setShowStarRules(true)}
+          onMouseLeave={() => setShowStarRules(false)}
+        >
+          <div className="star-rules-title">⭐ 本关星级规则</div>
+          {level.starRules.stars.map((rule, i) => (
+            <div key={i} className="star-rule-item">
+              <span className={"star-rule-star " + (i < resultStars ? "filled" : "empty")}>★</span>
+              <span className="star-rule-desc">{rule.description}</span>
+              {i < resultStars && <span className="star-rule-check">✓</span>}
+            </div>
+          ))}
+          <div className="star-rules-hint">收集星星并在限定次数内抵达终点</div>
+        </div>
       )}
     </div>
   );

@@ -219,8 +219,63 @@ button {
   border-radius: 6px;
 }
 
+.level-rules-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, #1e293b, #0f172a);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  border-radius: 10px;
+  padding: 10px 14px;
+  min-width: 180px;
+  z-index: 10;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.level-rules-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #1e293b;
+}
+
+.tooltip-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #93c5fd;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.tooltip-rule {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #cbd5e1;
+  padding: 2px 0;
+}
+
+.tooltip-star.filled {
+  color: #eab308;
+}
+
+.tooltip-star.empty {
+  color: #475569;
+}
+
+.tooltip-desc {
+  flex: 1;
+}
+
 .game-view {
   margin-top: 20px;
+  position: relative;
 }
 
 .game-hud {
@@ -717,6 +772,94 @@ button {
 .btn-tutorial:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(251, 191, 36, 0.4);
+}
+
+.btn-star-rules {
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
+.btn-star-rules:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+}
+
+.star-rules-popup {
+  position: absolute;
+  top: 70px;
+  right: 20px;
+  background: linear-gradient(180deg, #1e293b, #0f172a);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 12px;
+  padding: 14px 18px;
+  min-width: 220px;
+  z-index: 50;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  animation: popup-in 200ms ease;
+}
+
+@keyframes popup-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.star-rules-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #a5b4fc;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.star-rule-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.star-rule-star.filled {
+  color: #eab308;
+  font-size: 16px;
+}
+
+.star-rule-star.empty {
+  color: #475569;
+  font-size: 16px;
+}
+
+.star-rule-desc {
+  flex: 1;
+}
+
+.star-rule-check {
+  color: #22c55e;
+  font-weight: 800;
+}
+
+.star-rules-hint {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.2);
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
 }
 
 @media (max-width: 820px) {

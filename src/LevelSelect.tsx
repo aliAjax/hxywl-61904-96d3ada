@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { levels } from "./levels";
+import { levels, LevelDef } from "./levels";
 import { Progress, isUnlocked, getStars } from "./progress";
 import Tutorial, { TutorialStep } from "./Tutorial";
 
@@ -23,6 +23,7 @@ function StarRow(count: number, size: "sm" | "md" = "md") {
 export default function LevelSelect({ progress, onSelect }: Props) {
   const totalLevels = levels.length;
   const [showTutorial, setShowTutorial] = useState(false);
+  const [hoveredLevel, setHoveredLevel] = useState<LevelDef | null>(null);
   let clearedCount = 0;
   let totalStars = 0;
   let maxPossibleStars = 0;
@@ -120,11 +121,24 @@ export default function LevelSelect({ progress, onSelect }: Props) {
               }
               disabled={!unlocked}
               onClick={() => unlocked && onSelect(lv.id)}
+              onMouseEnter={() => unlocked && setHoveredLevel(lv)}
+              onMouseLeave={() => setHoveredLevel(null)}
             >
               <span className="level-num">{lv.id}</span>
               <span className="level-name">{unlocked ? lv.name : "🔒"}</span>
               {StarRow(stars)}
               {cleared && <span className="badge-cleared">已通关</span>}
+              {unlocked && hoveredLevel?.id === lv.id && (
+                <div className="level-rules-tooltip">
+                  <div className="tooltip-title">星级规则</div>
+                  {lv.starRules.stars.map((rule, i) => (
+                    <div key={i} className="tooltip-rule">
+                      <span className={"tooltip-star " + (i < stars ? "filled" : "empty")}>★</span>
+                      <span className="tooltip-desc">{rule.description}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </button>
           );
         })}
