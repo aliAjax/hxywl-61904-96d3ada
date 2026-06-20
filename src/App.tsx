@@ -66,7 +66,7 @@ function App() {
     setView({ kind: "editor", levelId, isNew: false });
   }, []);
 
-  const handleSaveLevel = useCallback(() => {
+  const handleSaveLevel = useCallback((_savedLevel: LevelDef) => {
     refreshCustomLevels();
   }, [refreshCustomLevels]);
 

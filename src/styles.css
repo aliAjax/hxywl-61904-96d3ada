@@ -1798,6 +1798,48 @@ button {
   margin-bottom: 6px;
 }
 
+.prop-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.prop-label-row label {
+  margin-bottom: 0;
+}
+
+.prop-number-input {
+  width: 72px;
+  padding: 4px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 6px;
+  background: rgba(30, 41, 59, 0.6);
+  color: #e2e8f0;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: right;
+}
+
+.prop-number-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.prop-item.has-error input[type="text"],
+.prop-item.has-error .prop-number-input {
+  border-color: rgba(239, 68, 68, 0.6);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.prop-error {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #f87171;
+  font-weight: 600;
+}
+
 .prop-item input[type="text"] {
   width: 100%;
   padding: 8px 10px;

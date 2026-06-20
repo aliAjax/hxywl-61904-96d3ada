@@ -35,6 +35,12 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
   const [levelName, setLevelName] = useState(initialLevel.name);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [dirty, setDirty] = useState(isNew);
+  const [errors, setErrors] = useState<{
+    name?: string;
+    maxShots?: string;
+    gravity?: string;
+    bounce?: string;
+  }>({});
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewport = useGameViewport();
@@ -55,6 +61,32 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
   useEffect(() => {
     setLevelName(level.name);
   }, [level.name]);
+
+  const validateName = (val: string): string | undefined => {
+    const trimmed = val.trim();
+    if (!trimmed) return "关卡名称不能为空";
+    if (trimmed.length > 20) return "关卡名称不能超过 20 个字符";
+    return undefined;
+  };
+
+  const validateMaxShots = (val: number): string | undefined => {
+    if (isNaN(val)) return "请输入有效数字";
+    if (val < 1 || val > 20) return "弹射次数需在 1-20 之间";
+    if (!Number.isInteger(val)) return "弹射次数必须是整数";
+    return undefined;
+  };
+
+  const validateGravity = (val: number): string | undefined => {
+    if (isNaN(val)) return "请输入有效数字";
+    if (val < 0.05 || val > 0.5) return "重力需在 0.05-0.5 之间";
+    return undefined;
+  };
+
+  const validateBounce = (val: number): string | undefined => {
+    if (isNaN(val)) return "请输入有效数字";
+    if (val < 0.3 || val > 0.95) return "反弹系数需在 0.3-0.95 之间";
+    return undefined;
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -497,21 +529,38 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
   }, [viewport.canvasWidth, viewport.canvasHeight]);
 
   const handleSave = useCallback(() => {
+    const trimmedName = levelName.trim();
+    const nameError = validateName(levelName);
+    const maxShotsError = validateMaxShots(level.maxShots);
+    const gravityError = validateGravity(level.gravity);
+    const bounceError = validateBounce(level.bounce);
+
+    const newErrors: typeof errors = {};
+    if (nameError) newErrors.name = nameError;
+    if (maxShotsError) newErrors.maxShots = maxShotsError;
+    if (gravityError) newErrors.gravity = gravityError;
+    if (bounceError) newErrors.bounce = bounceError;
+    setErrors(newErrors);
+
+    if (Object.keys(newErrors).length > 0) return;
+
     const levelToSave = updateStarRulesForLevel({
       ...level,
-      name: levelName.trim() || "自定义关卡",
+      name: trimmedName || "自定义关卡",
     });
     const saved = saveCustomLevel(levelToSave);
     setLevel(saved);
     setDirty(false);
     setShowSaveSuccess(true);
     setTimeout(() => setShowSaveSuccess(false), 2000);
-  }, [level, levelName]);
+    onSave(saved);
+  }, [level, levelName, onSave]);
 
   const handlePlay = useCallback(() => {
+    const trimmedName = levelName.trim();
     const levelToPlay = updateStarRulesForLevel({
       ...level,
-      name: levelName.trim() || "自定义关卡",
+      name: trimmedName || "自定义关卡",
     });
     setPlayLevel(JSON.parse(JSON.stringify(levelToPlay)));
     setIsPlaying(true);
@@ -545,25 +594,69 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
     setSelected(null);
   }, [selected, level]);
 
-  const handleMaxShotsChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setLevelName(val);
+    setDirty(true);
+    const err = validateName(val);
+    setErrors((prev) => ({ ...prev, name: err }));
+  }, []);
+
+  const handleMaxShotsSlider = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value) || 1;
     const clamped = Math.max(1, Math.min(20, val));
     setLevel({ ...level, maxShots: clamped });
     setDirty(true);
+    setErrors((prev) => ({ ...prev, maxShots: undefined }));
   }, [level]);
 
-  const handleGravityChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMaxShotsInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const val = parseInt(raw);
+    const err = validateMaxShots(val);
+    setErrors((prev) => ({ ...prev, maxShots: err }));
+    if (!err) {
+      setLevel({ ...level, maxShots: val });
+      setDirty(true);
+    }
+  }, [level]);
+
+  const handleGravitySlider = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value) || 0.1;
     const clamped = Math.max(0.05, Math.min(0.5, val));
     setLevel({ ...level, gravity: parseFloat(clamped.toFixed(3)) });
     setDirty(true);
+    setErrors((prev) => ({ ...prev, gravity: undefined }));
   }, [level]);
 
-  const handleBounceChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleGravityInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const val = parseFloat(raw);
+    const err = validateGravity(val);
+    setErrors((prev) => ({ ...prev, gravity: err }));
+    if (!err) {
+      setLevel({ ...level, gravity: parseFloat(val.toFixed(3)) });
+      setDirty(true);
+    }
+  }, [level]);
+
+  const handleBounceSlider = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value) || 0.5;
     const clamped = Math.max(0.3, Math.min(0.95, val));
     setLevel({ ...level, bounce: parseFloat(clamped.toFixed(2)) });
     setDirty(true);
+    setErrors((prev) => ({ ...prev, bounce: undefined }));
+  }, [level]);
+
+  const handleBounceInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const val = parseFloat(raw);
+    const err = validateBounce(val);
+    setErrors((prev) => ({ ...prev, bounce: err }));
+    if (!err) {
+      setLevel({ ...level, bounce: parseFloat(val.toFixed(2)) });
+      setDirty(true);
+    }
   }, [level]);
 
   if (isPlaying && playLevel) {
@@ -675,49 +768,83 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
         <div className="editor-properties">
           <div className="prop-section">
             <div className="prop-section-title">关卡设置</div>
-            <div className="prop-item">
+            <div className={"prop-item" + (errors.name ? " has-error" : "")}>
               <label>关卡名称</label>
               <input
                 type="text"
                 value={levelName}
-                onChange={(e) => {
-                  setLevelName(e.target.value);
-                  setDirty(true);
-                }}
+                onChange={handleNameChange}
                 placeholder="输入关卡名称"
+                maxLength={30}
               />
+              {errors.name && <span className="prop-error">{errors.name}</span>}
             </div>
-            <div className="prop-item">
-              <label>弹射次数: {level.maxShots}</label>
+            <div className={"prop-item" + (errors.maxShots ? " has-error" : "")}>
+              <div className="prop-label-row">
+                <label>弹射次数</label>
+                <input
+                  type="number"
+                  className="prop-number-input"
+                  min="1"
+                  max="20"
+                  value={level.maxShots}
+                  onChange={handleMaxShotsInput}
+                />
+              </div>
               <input
                 type="range"
                 min="1"
                 max="20"
                 value={level.maxShots}
-                onChange={handleMaxShotsChange}
+                onChange={handleMaxShotsSlider}
               />
+              {errors.maxShots && <span className="prop-error">{errors.maxShots}</span>}
             </div>
-            <div className="prop-item">
-              <label>重力: {level.gravity.toFixed(3)}</label>
+            <div className={"prop-item" + (errors.gravity ? " has-error" : "")}>
+              <div className="prop-label-row">
+                <label>重力</label>
+                <input
+                  type="number"
+                  className="prop-number-input"
+                  min="0.05"
+                  max="0.5"
+                  step="0.01"
+                  value={level.gravity}
+                  onChange={handleGravityInput}
+                />
+              </div>
               <input
                 type="range"
                 min="0.05"
                 max="0.5"
                 step="0.01"
                 value={level.gravity}
-                onChange={handleGravityChange}
+                onChange={handleGravitySlider}
               />
+              {errors.gravity && <span className="prop-error">{errors.gravity}</span>}
             </div>
-            <div className="prop-item">
-              <label>弹力: {level.bounce.toFixed(2)}</label>
+            <div className={"prop-item" + (errors.bounce ? " has-error" : "")}>
+              <div className="prop-label-row">
+                <label>反弹系数</label>
+                <input
+                  type="number"
+                  className="prop-number-input"
+                  min="0.3"
+                  max="0.95"
+                  step="0.05"
+                  value={level.bounce}
+                  onChange={handleBounceInput}
+                />
+              </div>
               <input
                 type="range"
                 min="0.3"
                 max="0.95"
                 step="0.05"
                 value={level.bounce}
-                onChange={handleBounceChange}
+                onChange={handleBounceSlider}
               />
+              {errors.bounce && <span className="prop-error">{errors.bounce}</span>}
             </div>
           </div>
 
