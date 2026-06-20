@@ -37,8 +37,6 @@ const LAUNCH_POWER = 0.12;
 export default function Game({ level, progress, onBack, onComplete, onNext }: Props) {
   const hasNextLevel = levels.some((l) => l.id === level.id + 1);
   const prevBestStars = getStars(level.id, progress);
-  const levelEverCleared = !!progress[level.id]?.cleared;
-  const nextLevelUnlocked = hasNextLevel && levelEverCleared;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
   const ballRef = useRef<Ball>({
@@ -512,7 +510,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
               <button className="btn-retry" onClick={handleRetry}>
                 🔄 重新挑战
               </button>
-              {(clearedRef.current || nextLevelUnlocked) && hasNextLevel && (
+              {hasNextLevel && (
                 <button className="btn-next" onClick={onNext}>
                   下一关 →
                 </button>
