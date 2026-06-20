@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { levels, LevelDef } from "./levels";
 import { Progress, isUnlocked, getStars } from "./progress";
 import Tutorial, { TutorialStep } from "./Tutorial";
+
+type FilterType = "all" | "notCleared" | "cleared" | "notFullStars" | "custom";
+type SortType = "id" | "stars";
 
 interface Props {
   progress: Progress;
@@ -29,6 +32,9 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
   const [showTutorial, setShowTutorial] = useState(false);
   const [hoveredLevel, setHoveredLevel] = useState<LevelDef | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
+  const [filter, setFilter] = useState<FilterType>("all");
+  const [sort, setSort] = useState<SortType>("id");
+
   let clearedCount = 0;
   let totalStars = 0;
   let maxPossibleStars = 0;
@@ -41,6 +47,52 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
   });
   const progressPct = Math.round((clearedCount / levels.length) * 100);
   const starsPct = Math.round((totalStars / (levels.length * 3)) * 100);
+
+  const allLevels = useMemo(() => {
+    return [
+      ...levels.map((lv) => ({ ...lv, isCustom: false as const })),
+      ...customLevels.map((lv) => ({ ...lv, isCustom: true as const })),
+    ];
+  }, [customLevels]);
+
+  const filteredLevels = useMemo(() => {
+    let result = [...allLevels];
+
+    switch (filter) {
+      case "notCleared":
+        result = result.filter((lv) => !progress[lv.id]?.cleared);
+        break;
+      case "cleared":
+        result = result.filter((lv) => progress[lv.id]?.cleared);
+        break;
+      case "notFullStars":
+        result = result.filter((lv) => {
+          const stars = getStars(lv.id, progress);
+          const cleared = progress[lv.id]?.cleared;
+          return !cleared || stars < 3;
+        });
+        break;
+      case "custom":
+        result = result.filter((lv) => lv.isCustom);
+        break;
+      case "all":
+      default:
+        break;
+    }
+
+    result.sort((a, b) => {
+      if (sort === "id") {
+        return a.id - b.id;
+      } else {
+        const starsA = getStars(a.id, progress);
+        const starsB = getStars(b.id, progress);
+        if (starsB !== starsA) return starsB - starsA;
+        return a.id - b.id;
+      }
+    });
+
+    return result;
+  }, [allLevels, filter, sort, progress]);
 
   const tutorialSteps: TutorialStep[] = [
     {
@@ -84,7 +136,7 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
   return (
     <div className="level-select">
       <div className="level-select-header">
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
           <h2>选择关卡</h2>
           <button className="btn-tutorial" onClick={() => setShowTutorial(true)}>
             ❓ 游戏说明
@@ -121,104 +173,140 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
         </div>
       </div>
 
-      <div className="level-section">
-        <h3 className="level-section-title">🎮 官方关卡</h3>
-        <div className="level-grid">
-          {levels.map((lv) => {
-            const unlocked = isUnlocked(lv.id, progress);
-            const stars = getStars(lv.id, progress);
-            const cleared = progress[lv.id]?.cleared;
-            return (
+      <div className="filter-sort-bar">
+        <div className="filter-group">
+          <span className="filter-label">筛选：</span>
+          <div className="filter-chips">
+            {[
+              { key: "all", label: "全部" },
+              { key: "notCleared", label: "未通关" },
+              { key: "cleared", label: "已通关" },
+              { key: "notFullStars", label: "未满星" },
+              { key: "custom", label: "自定义" },
+            ].map((item) => (
               <button
-                key={lv.id}
-                className={
-                  "level-card" +
-                  (unlocked ? " unlocked" : " locked") +
-                  (cleared ? " cleared" : "")
-                }
-                disabled={!unlocked}
-                onClick={() => unlocked && onSelect(lv.id)}
-                onMouseEnter={() => unlocked && setHoveredLevel(lv)}
-                onMouseLeave={() => setHoveredLevel(null)}
+                key={item.key}
+                className={"filter-chip" + (filter === item.key ? " active" : "")}
+                onClick={() => setFilter(item.key as FilterType)}
               >
-                <span className="level-num">{lv.id}</span>
-                <span className="level-name">{unlocked ? lv.name : "🔒"}</span>
-                {StarRow(stars)}
-                {cleared && <span className="badge-cleared">已通关</span>}
-                {unlocked && hoveredLevel?.id === lv.id && (
-                  <div className="level-rules-tooltip">
-                    <div className="tooltip-title">星级规则</div>
-                    {lv.starRules.stars.map((rule, i) => (
-                      <div key={i} className="tooltip-rule">
-                        <span className={"tooltip-star " + (i < stars ? "filled" : "empty")}>★</span>
-                        <span className="tooltip-desc">{rule.description}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {item.label}
               </button>
-            );
-          })}
+            ))}
+          </div>
+        </div>
+        <div className="sort-group">
+          <span className="filter-label">排序：</span>
+          <div className="filter-chips">
+            {[
+              { key: "id", label: "关卡编号" },
+              { key: "stars", label: "获得星级" },
+            ].map((item) => (
+              <button
+                key={item.key}
+                className={"filter-chip" + (sort === item.key ? " active" : "")}
+                onClick={() => setSort(item.key as SortType)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       <div className="level-section">
-        <h3 className="level-section-title">🛠 自定义关卡</h3>
-        {customLevels.length === 0 ? (
-          <div className="empty-custom-levels">
-            <p>还没有自定义关卡</p>
-            <button className="btn-create-level-large" onClick={onCreateLevel}>
-              ➕ 创建第一个关卡
+        {filteredLevels.length === 0 ? (
+          <div className="empty-filter-result">
+            <p>没有符合条件的关卡</p>
+            <button className="btn-create-level-large" onClick={() => setFilter("all")}>
+              🔄 查看全部关卡
             </button>
           </div>
         ) : (
           <div className="level-grid">
-            {customLevels.map((lv) => {
-              const stars = getStars(lv.id, progress);
-              const cleared = progress[lv.id]?.cleared;
-              return (
-                <div
-                  key={lv.id}
-                  className={
-                    "level-card custom unlocked" +
-                    (cleared ? " cleared" : "")
-                  }
-                >
-                  <span className="custom-badge">自定义</span>
-                  <span className="level-num">C{lv.id - 1000 + 1}</span>
-                  <span className="level-name">{lv.name}</span>
-                  {StarRow(stars)}
-                  {cleared && <span className="badge-cleared">已通关</span>}
-                  <div className="custom-level-actions">
-                    <button
-                      className="btn-play-small"
-                      onClick={() => onSelect(lv.id)}
-                    >
-                      ▶ 试玩
-                    </button>
-                    <button
-                      className="btn-edit-small"
-                      onClick={() => onEditLevel(lv.id)}
-                    >
-                      ✏ 编辑
-                    </button>
-                    <button
-                      className="btn-delete-small"
-                      onClick={() => setShowDeleteConfirm(lv.id)}
-                    >
-                      🗑
-                    </button>
+            {filteredLevels.map((lv) => {
+              if (lv.isCustom) {
+                const stars = getStars(lv.id, progress);
+                const cleared = progress[lv.id]?.cleared;
+                return (
+                  <div
+                    key={lv.id}
+                    className={
+                      "level-card custom unlocked" +
+                      (cleared ? " cleared" : "")
+                    }
+                  >
+                    <span className="custom-badge">自定义</span>
+                    <span className="level-num">C{lv.id - 1000 + 1}</span>
+                    <span className="level-name">{lv.name}</span>
+                    {StarRow(stars)}
+                    {cleared && <span className="badge-cleared">已通关</span>}
+                    <div className="custom-level-actions">
+                      <button
+                        className="btn-play-small"
+                        onClick={() => onSelect(lv.id)}
+                      >
+                        ▶ 试玩
+                      </button>
+                      <button
+                        className="btn-edit-small"
+                        onClick={() => onEditLevel(lv.id)}
+                      >
+                        ✏ 编辑
+                      </button>
+                      <button
+                        className="btn-delete-small"
+                        onClick={() => setShowDeleteConfirm(lv.id)}
+                      >
+                        🗑
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
+                );
+              } else {
+                const unlocked = isUnlocked(lv.id, progress);
+                const stars = getStars(lv.id, progress);
+                const cleared = progress[lv.id]?.cleared;
+                return (
+                  <button
+                    key={lv.id}
+                    className={
+                      "level-card" +
+                      (unlocked ? " unlocked" : " locked") +
+                      (cleared ? " cleared" : "")
+                    }
+                    disabled={!unlocked}
+                    onClick={() => unlocked && onSelect(lv.id)}
+                    onMouseEnter={() => unlocked && setHoveredLevel(lv)}
+                    onMouseLeave={() => setHoveredLevel(null)}
+                  >
+                    <span className="level-num">{lv.id}</span>
+                    <span className="level-name">{unlocked ? lv.name : "🔒"}</span>
+                    {StarRow(stars)}
+                    {cleared && <span className="badge-cleared">已通关</span>}
+                    {unlocked && hoveredLevel?.id === lv.id && (
+                      <div className="level-rules-tooltip">
+                        <div className="tooltip-title">星级规则</div>
+                        {lv.starRules.stars.map((rule, i) => (
+                          <div key={i} className="tooltip-rule">
+                            <span className={"tooltip-star " + (i < stars ? "filled" : "empty")}>★</span>
+                            <span className="tooltip-desc">{rule.description}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </button>
+                );
+              }
             })}
-            <button
-              className="level-card add-card"
-              onClick={onCreateLevel}
-            >
-              <span className="add-icon">➕</span>
-              <span className="add-text">新建关卡</span>
-            </button>
+            {filter !== "custom" && (
+              <button
+                className="level-card add-card"
+                onClick={onCreateLevel}
+              >
+                <span className="add-icon">➕</span>
+                <span className="add-text">新建关卡</span>
+              </button>
+            )}
           </div>
         )}
       </div>
