@@ -6,6 +6,10 @@ import Tutorial, { TutorialStep } from "./Tutorial";
 interface Props {
   progress: Progress;
   onSelect: (levelId: number) => void;
+  onCreateLevel: () => void;
+  onEditLevel: (levelId: number) => void;
+  onDeleteLevel: (levelId: number) => void;
+  customLevels: LevelDef[];
 }
 
 function StarRow(count: number, size: "sm" | "md" = "md") {
@@ -20,10 +24,11 @@ function StarRow(count: number, size: "sm" | "md" = "md") {
   );
 }
 
-export default function LevelSelect({ progress, onSelect }: Props) {
-  const totalLevels = levels.length;
+export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditLevel, onDeleteLevel, customLevels }: Props) {
+  const totalLevels = levels.length + customLevels.length;
   const [showTutorial, setShowTutorial] = useState(false);
   const [hoveredLevel, setHoveredLevel] = useState<LevelDef | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null);
   let clearedCount = 0;
   let totalStars = 0;
   let maxPossibleStars = 0;
@@ -34,8 +39,8 @@ export default function LevelSelect({ progress, onSelect }: Props) {
     totalStars += stars;
     maxPossibleStars += 3;
   });
-  const progressPct = Math.round((clearedCount / totalLevels) * 100);
-  const starsPct = Math.round((totalStars / maxPossibleStars) * 100);
+  const progressPct = Math.round((clearedCount / levels.length) * 100);
+  const starsPct = Math.round((totalStars / (levels.length * 3)) * 100);
 
   const tutorialSteps: TutorialStep[] = [
     {
@@ -84,12 +89,15 @@ export default function LevelSelect({ progress, onSelect }: Props) {
           <button className="btn-tutorial" onClick={() => setShowTutorial(true)}>
             ❓ 游戏说明
           </button>
+          <button className="btn-create-level" onClick={onCreateLevel}>
+            ➕ 新建关卡
+          </button>
         </div>
         <div className="progress-summary">
           <div className="progress-item">
             <span className="progress-label">通关进度</span>
             <span className="progress-value">
-              {clearedCount}/{totalLevels} ({progressPct}%)
+              {clearedCount}/{levels.length} ({progressPct}%)
             </span>
             <div className="progress-bar">
               <div
@@ -101,7 +109,7 @@ export default function LevelSelect({ progress, onSelect }: Props) {
           <div className="progress-item">
             <span className="progress-label">星星收集</span>
             <span className="progress-value stars">
-              ★ {totalStars}/{maxPossibleStars} ({starsPct}%)
+              ★ {totalStars}/{levels.length * 3} ({starsPct}%)
             </span>
             <div className="progress-bar">
               <div
@@ -112,43 +120,137 @@ export default function LevelSelect({ progress, onSelect }: Props) {
           </div>
         </div>
       </div>
-      <div className="level-grid">
-        {levels.map((lv) => {
-          const unlocked = isUnlocked(lv.id, progress);
-          const stars = getStars(lv.id, progress);
-          const cleared = progress[lv.id]?.cleared;
-          return (
-            <button
-              key={lv.id}
-              className={
-                "level-card" +
-                (unlocked ? " unlocked" : " locked") +
-                (cleared ? " cleared" : "")
-              }
-              disabled={!unlocked}
-              onClick={() => unlocked && onSelect(lv.id)}
-              onMouseEnter={() => unlocked && setHoveredLevel(lv)}
-              onMouseLeave={() => setHoveredLevel(null)}
-            >
-              <span className="level-num">{lv.id}</span>
-              <span className="level-name">{unlocked ? lv.name : "🔒"}</span>
-              {StarRow(stars)}
-              {cleared && <span className="badge-cleared">已通关</span>}
-              {unlocked && hoveredLevel?.id === lv.id && (
-                <div className="level-rules-tooltip">
-                  <div className="tooltip-title">星级规则</div>
-                  {lv.starRules.stars.map((rule, i) => (
-                    <div key={i} className="tooltip-rule">
-                      <span className={"tooltip-star " + (i < stars ? "filled" : "empty")}>★</span>
-                      <span className="tooltip-desc">{rule.description}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </button>
-          );
-        })}
+
+      <div className="level-section">
+        <h3 className="level-section-title">🎮 官方关卡</h3>
+        <div className="level-grid">
+          {levels.map((lv) => {
+            const unlocked = isUnlocked(lv.id, progress);
+            const stars = getStars(lv.id, progress);
+            const cleared = progress[lv.id]?.cleared;
+            return (
+              <button
+                key={lv.id}
+                className={
+                  "level-card" +
+                  (unlocked ? " unlocked" : " locked") +
+                  (cleared ? " cleared" : "")
+                }
+                disabled={!unlocked}
+                onClick={() => unlocked && onSelect(lv.id)}
+                onMouseEnter={() => unlocked && setHoveredLevel(lv)}
+                onMouseLeave={() => setHoveredLevel(null)}
+              >
+                <span className="level-num">{lv.id}</span>
+                <span className="level-name">{unlocked ? lv.name : "🔒"}</span>
+                {StarRow(stars)}
+                {cleared && <span className="badge-cleared">已通关</span>}
+                {unlocked && hoveredLevel?.id === lv.id && (
+                  <div className="level-rules-tooltip">
+                    <div className="tooltip-title">星级规则</div>
+                    {lv.starRules.stars.map((rule, i) => (
+                      <div key={i} className="tooltip-rule">
+                        <span className={"tooltip-star " + (i < stars ? "filled" : "empty")}>★</span>
+                        <span className="tooltip-desc">{rule.description}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
+
+      <div className="level-section">
+        <h3 className="level-section-title">🛠 自定义关卡</h3>
+        {customLevels.length === 0 ? (
+          <div className="empty-custom-levels">
+            <p>还没有自定义关卡</p>
+            <button className="btn-create-level-large" onClick={onCreateLevel}>
+              ➕ 创建第一个关卡
+            </button>
+          </div>
+        ) : (
+          <div className="level-grid">
+            {customLevels.map((lv) => {
+              const stars = getStars(lv.id, progress);
+              const cleared = progress[lv.id]?.cleared;
+              return (
+                <div
+                  key={lv.id}
+                  className={
+                    "level-card custom unlocked" +
+                    (cleared ? " cleared" : "")
+                  }
+                >
+                  <span className="custom-badge">自定义</span>
+                  <span className="level-num">C{lv.id - 1000 + 1}</span>
+                  <span className="level-name">{lv.name}</span>
+                  {StarRow(stars)}
+                  {cleared && <span className="badge-cleared">已通关</span>}
+                  <div className="custom-level-actions">
+                    <button
+                      className="btn-play-small"
+                      onClick={() => onSelect(lv.id)}
+                    >
+                      ▶ 试玩
+                    </button>
+                    <button
+                      className="btn-edit-small"
+                      onClick={() => onEditLevel(lv.id)}
+                    >
+                      ✏ 编辑
+                    </button>
+                    <button
+                      className="btn-delete-small"
+                      onClick={() => setShowDeleteConfirm(lv.id)}
+                    >
+                      🗑
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            <button
+              className="level-card add-card"
+              onClick={onCreateLevel}
+            >
+              <span className="add-icon">➕</span>
+              <span className="add-text">新建关卡</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {showDeleteConfirm !== null && (
+        <div className="delete-confirm-overlay" onClick={() => setShowDeleteConfirm(null)}>
+          <div className="delete-confirm-card" onClick={(e) => e.stopPropagation()}>
+            <h3>确认删除？</h3>
+            <p>删除后无法恢复，确定要删除这个自定义关卡吗？</p>
+            <div className="delete-confirm-actions">
+              <button
+                className="btn-cancel-delete"
+                onClick={() => setShowDeleteConfirm(null)}
+              >
+                取消
+              </button>
+              <button
+                className="btn-confirm-delete"
+                onClick={() => {
+                  if (showDeleteConfirm !== null) {
+                    onDeleteLevel(showDeleteConfirm);
+                    setShowDeleteConfirm(null);
+                  }
+                }}
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showTutorial && (
         <Tutorial
           steps={tutorialSteps}

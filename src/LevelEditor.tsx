@@ -1,0 +1,787 @@
+import { useState, useRef, useEffect, useCallback } from "react";
+import { LevelDef, StarDef, ObstacleDef, CANVAS_W, CANVAS_H } from "./levels";
+import { useGameViewport, screenToWorld, ViewportInfo } from "./useGameViewport";
+import { DEFAULT_CONFIG, PhysicsConfig } from "./physics";
+import Game from "./Game";
+import {
+  saveCustomLevel,
+  updateStarRulesForLevel,
+} from "./customLevels";
+
+type Tool = "select" | "ball" | "goal" | "star" | "wall" | "oneTime" | "slowZone" | "delete";
+
+type SelectedItem =
+  | { type: "ball" }
+  | { type: "goal" }
+  | { type: "star"; index: number }
+  | { type: "obstacle"; index: number }
+  | null;
+
+interface EditorProps {
+  level: LevelDef;
+  onBack: () => void;
+  onSave: (level: LevelDef) => void;
+  isNew: boolean;
+}
+
+const config: PhysicsConfig = DEFAULT_CONFIG;
+
+export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew }: EditorProps) {
+  const [level, setLevel] = useState<LevelDef>(initialLevel);
+  const [tool, setTool] = useState<Tool>("select");
+  const [selected, setSelected] = useState<SelectedItem>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playLevel, setPlayLevel] = useState<LevelDef | null>(null);
+  const [levelName, setLevelName] = useState(initialLevel.name);
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [dirty, setDirty] = useState(isNew);
+
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewport = useGameViewport();
+  const viewportRef = useRef<ViewportInfo>(viewport);
+  viewportRef.current = viewport;
+  const rafRef = useRef(0);
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    origX: number;
+    origY: number;
+    origW?: number;
+    origH?: number;
+    resizing?: boolean;
+    resizeHandle?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    setLevelName(level.name);
+  }, [level.name]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d")!;
+
+    function draw() {
+      const vp = viewportRef.current;
+      const dpr = window.devicePixelRatio || 1;
+
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, vp.canvasWidth, vp.canvasHeight);
+
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(0, 0, vp.canvasWidth, vp.canvasHeight);
+
+      ctx.save();
+      ctx.translate(vp.offsetX, vp.offsetY);
+      ctx.scale(vp.scale, vp.scale);
+
+      ctx.strokeStyle = "rgba(148,163,184,0.12)";
+      ctx.lineWidth = 1;
+      for (let gx = 0; gx < CANVAS_W; gx += 40) {
+        ctx.beginPath();
+        ctx.moveTo(gx, 0);
+        ctx.lineTo(gx, CANVAS_H);
+        ctx.stroke();
+      }
+      for (let gy = 0; gy < CANVAS_H; gy += 40) {
+        ctx.beginPath();
+        ctx.moveTo(0, gy);
+        ctx.lineTo(CANVAS_W, gy);
+        ctx.stroke();
+      }
+
+      level.obstacles.forEach((ob, idx) => {
+        const isSelected = selected?.type === "obstacle" && selected.index === idx;
+
+        if (ob.type === "wall") {
+          ctx.fillStyle = isSelected ? "#60a5fa" : "#475569";
+          ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.strokeStyle = isSelected ? "#93c5fd" : "#64748b";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(ob.x, ob.y, ob.w, ob.h);
+        } else if (ob.type === "oneTime") {
+          ctx.fillStyle = isSelected ? "#fb923c" : "#f97316";
+          ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.strokeStyle = isSelected ? "#fdba74" : "#ea580c";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.fillStyle = "rgba(255,255,255,0.8)";
+          ctx.font = "bold 12px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("1", ob.x + ob.w / 2, ob.y + ob.h / 2);
+        } else if (ob.type === "slowZone") {
+          ctx.globalAlpha = 0.5;
+          ctx.fillStyle = isSelected ? "#a78bfa" : "#8b5cf6";
+          ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = isSelected ? "#c4b5fd" : "#a78bfa";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          ctx.strokeRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.setLineDash([]);
+          ctx.fillStyle = "rgba(255,255,255,0.8)";
+          ctx.font = "bold 14px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("❄", ob.x + ob.w / 2, ob.y + ob.h / 2);
+        }
+
+        if (isSelected) {
+          drawResizeHandles(ctx, ob.x, ob.y, ob.w, ob.h);
+        }
+      });
+
+      const goalPulse = 1 + Math.sin(Date.now() / 400) * 0.05;
+      const goalR = config.goalRadius * goalPulse;
+      const goalSelected = selected?.type === "goal";
+
+      ctx.beginPath();
+      ctx.arc(level.goal.x, level.goal.y, goalR, 0, Math.PI * 2);
+      const goalGrad = ctx.createRadialGradient(
+        level.goal.x, level.goal.y, 0,
+        level.goal.x, level.goal.y, goalR
+      );
+      goalGrad.addColorStop(0, goalSelected ? "#4ade80" : "#22c55e");
+      goalGrad.addColorStop(1, "rgba(34,197,94,0.2)");
+      ctx.fillStyle = goalGrad;
+      ctx.fill();
+      ctx.strokeStyle = goalSelected ? "#86efac" : "#22c55e";
+      ctx.lineWidth = goalSelected ? 3 : 2;
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 14px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("终", level.goal.x, level.goal.y);
+
+      level.stars.forEach((star, idx) => {
+        const isSelected = selected?.type === "star" && selected.index === idx;
+        const t = Date.now() / 500;
+        const pulse = 1 + Math.sin(t + star.x * 0.01) * 0.05;
+        const sr = config.starRadius * pulse;
+
+        ctx.beginPath();
+        ctx.arc(star.x, star.y, sr, 0, Math.PI * 2);
+        const starGrad = ctx.createRadialGradient(star.x, star.y, 0, star.x, star.y, sr);
+        starGrad.addColorStop(0, isSelected ? "#fde047" : "#fbbf24");
+        starGrad.addColorStop(1, "rgba(251,191,36,0.15)");
+        ctx.fillStyle = starGrad;
+        ctx.fill();
+        ctx.strokeStyle = isSelected ? "#fef08a" : "#eab308";
+        ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        ctx.stroke();
+        ctx.fillStyle = "#78350f";
+        ctx.font = "bold 16px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("★", star.x, star.y);
+      });
+
+      const ballSelected = selected?.type === "ball";
+      ctx.beginPath();
+      ctx.arc(level.ball.x, level.ball.y, config.ballRadius, 0, Math.PI * 2);
+      const ballGrad = ctx.createRadialGradient(-3, -3, 2, 0, 0, config.ballRadius);
+      ballGrad.addColorStop(0, ballSelected ? "#93c5fd" : "#60a5fa");
+      ballGrad.addColorStop(1, ballSelected ? "#3b82f6" : "#2563eb");
+      ctx.fillStyle = ballGrad;
+      ctx.fill();
+      ctx.strokeStyle = ballSelected ? "#bfdbfe" : "#93c5fd";
+      ctx.lineWidth = ballSelected ? 3 : 2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(-config.ballRadius * 0.35, -config.ballRadius * 0.35, config.ballRadius * 0.28, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.fill();
+
+      ctx.restore();
+      ctx.restore();
+    }
+
+    function loop() {
+      draw();
+      rafRef.current = requestAnimationFrame(loop);
+    }
+
+    rafRef.current = requestAnimationFrame(loop);
+
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+    };
+  }, [level, selected]);
+
+  function drawResizeHandles(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+    const size = 8;
+    const handles = [
+      { x: x, y: y, cursor: "nw" },
+      { x: x + w, y: y, cursor: "ne" },
+      { x: x, y: y + h, cursor: "sw" },
+      { x: x + w, y: y + h, cursor: "se" },
+    ];
+    handles.forEach((h) => {
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(h.x - size / 2, h.y - size / 2, size, size);
+      ctx.strokeStyle = "#2563eb";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(h.x - size / 2, h.y - size / 2, size, size);
+    });
+  }
+
+  function getResizeHandle(x: number, y: number, ob: ObstacleDef): string | null {
+    const size = 10;
+    const handles: { x: number; y: number; name: string }[] = [
+      { x: ob.x, y: ob.y, name: "nw" },
+      { x: ob.x + ob.w, y: ob.y, name: "ne" },
+      { x: ob.x, y: ob.y + ob.h, name: "sw" },
+      { x: ob.x + ob.w, y: ob.y + ob.h, name: "se" },
+    ];
+    for (const h of handles) {
+      if (Math.abs(x - h.x) < size && Math.abs(y - h.y) < size) {
+        return h.name;
+      }
+    }
+    return null;
+  }
+
+  function hitTest(x: number, y: number): SelectedItem {
+    const b = config.ballRadius;
+    if (Math.sqrt((x - level.ball.x) ** 2 + (y - level.ball.y) ** 2) < b + 5) {
+      return { type: "ball" };
+    }
+
+    if (Math.sqrt((x - level.goal.x) ** 2 + (y - level.goal.y) ** 2) < config.goalRadius + 5) {
+      return { type: "goal" };
+    }
+
+    for (let i = level.stars.length - 1; i >= 0; i--) {
+      const s = level.stars[i];
+      if (Math.sqrt((x - s.x) ** 2 + (y - s.y) ** 2) < config.starRadius + 3) {
+        return { type: "star", index: i };
+      }
+    }
+
+    for (let i = level.obstacles.length - 1; i >= 0; i--) {
+      const ob = level.obstacles[i];
+      if (x >= ob.x - 3 && x <= ob.x + ob.w + 3 && y >= ob.y - 3 && y <= ob.y + ob.h + 3) {
+        return { type: "obstacle", index: i };
+      }
+    }
+
+    return null;
+  }
+
+  const getPos = useCallback((e: MouseEvent | TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    let clientX: number, clientY: number;
+    if ("touches" in e) {
+      const t = e.touches[0] || e.changedTouches[0];
+      clientX = t.clientX;
+      clientY = t.clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    const screenX = clientX - rect.left;
+    const screenY = clientY - rect.top;
+    return screenToWorld(screenX, screenY, viewportRef.current);
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const canvasEl = canvas;
+
+    function onDown(e: MouseEvent | TouchEvent) {
+      e.preventDefault();
+      const pos = getPos(e);
+      const clampedX = Math.max(0, Math.min(CANVAS_W, pos.x));
+      const clampedY = Math.max(0, Math.min(CANVAS_H, pos.y));
+
+      if (tool === "select") {
+        const hit = hitTest(pos.x, pos.y);
+        setSelected(hit);
+
+        if (hit) {
+          if (hit.type === "obstacle") {
+            const ob = level.obstacles[hit.index];
+            const handle = getResizeHandle(pos.x, pos.y, ob);
+            if (handle) {
+              dragRef.current = {
+                startX: pos.x,
+                startY: pos.y,
+                origX: ob.x,
+                origY: ob.y,
+                origW: ob.w,
+                origH: ob.h,
+                resizing: true,
+                resizeHandle: handle,
+              };
+              return;
+            }
+          }
+
+          let origX = 0, origY = 0;
+          if (hit.type === "ball") {
+            origX = level.ball.x;
+            origY = level.ball.y;
+          } else if (hit.type === "goal") {
+            origX = level.goal.x;
+            origY = level.goal.y;
+          } else if (hit.type === "star") {
+            origX = level.stars[hit.index].x;
+            origY = level.stars[hit.index].y;
+          } else if (hit.type === "obstacle") {
+            origX = level.obstacles[hit.index].x;
+            origY = level.obstacles[hit.index].y;
+          }
+          dragRef.current = {
+            startX: pos.x,
+            startY: pos.y,
+            origX,
+            origY,
+          };
+        }
+      } else if (tool === "delete") {
+        const hit = hitTest(pos.x, pos.y);
+        if (hit && hit.type !== "ball" && hit.type !== "goal") {
+          if (hit.type === "star") {
+            const newStars = level.stars.filter((_, i) => i !== hit.index);
+            const updated = updateStarRulesForLevel({ ...level, stars: newStars });
+            setLevel(updated);
+            setDirty(true);
+          } else if (hit.type === "obstacle") {
+            setLevel({
+              ...level,
+              obstacles: level.obstacles.filter((_, i) => i !== hit.index),
+            });
+            setDirty(true);
+          }
+          setSelected(null);
+        }
+      } else {
+        if (tool === "ball") {
+          setLevel({ ...level, ball: { x: clampedX, y: clampedY } });
+          setSelected({ type: "ball" });
+          setDirty(true);
+        } else if (tool === "goal") {
+          setLevel({ ...level, goal: { x: clampedX, y: clampedY } });
+          setSelected({ type: "goal" });
+          setDirty(true);
+        } else if (tool === "star") {
+          const newStar: StarDef = { x: clampedX, y: clampedY };
+          const newStars = [...level.stars, newStar];
+          const updated = updateStarRulesForLevel({ ...level, stars: newStars });
+          setLevel(updated);
+          setSelected({ type: "star", index: newStars.length - 1 });
+          setDirty(true);
+        } else if (tool === "wall" || tool === "oneTime" || tool === "slowZone") {
+          const defaultW = tool === "slowZone" ? 80 : 60;
+          const defaultH = tool === "slowZone" ? 60 : 16;
+          const newOb: ObstacleDef = {
+            x: clampedX - defaultW / 2,
+            y: clampedY - defaultH / 2,
+            w: defaultW,
+            h: defaultH,
+            type: tool,
+          };
+          setLevel({
+            ...level,
+            obstacles: [...level.obstacles, newOb],
+          });
+          setSelected({ type: "obstacle", index: level.obstacles.length });
+          setDirty(true);
+        }
+      }
+    }
+
+    function onMove(e: MouseEvent | TouchEvent) {
+      if (!dragRef.current || !selected) return;
+      e.preventDefault();
+      const pos = getPos(e);
+      const drag = dragRef.current;
+      const dx = pos.x - drag.startX;
+      const dy = pos.y - drag.startY;
+
+      if (drag.resizing && selected.type === "obstacle" && drag.origW !== undefined && drag.origH !== undefined) {
+        const idx = selected.index;
+        const ob = level.obstacles[idx];
+        let newX = ob.x;
+        let newY = ob.y;
+        let newW = ob.w;
+        let newH = ob.h;
+
+        if (drag.resizeHandle?.includes("e")) {
+          newW = Math.max(20, drag.origW + dx);
+        }
+        if (drag.resizeHandle?.includes("w")) {
+          newW = Math.max(20, drag.origW - dx);
+          newX = drag.origX + (drag.origW - newW);
+        }
+        if (drag.resizeHandle?.includes("s")) {
+          newH = Math.max(14, drag.origH + dy);
+        }
+        if (drag.resizeHandle?.includes("n")) {
+          newH = Math.max(14, drag.origH - dy);
+          newY = drag.origY + (drag.origH - newH);
+        }
+
+        const newObstacles = [...level.obstacles];
+        newObstacles[idx] = { ...ob, x: newX, y: newY, w: newW, h: newH };
+        setLevel({ ...level, obstacles: newObstacles });
+        setDirty(true);
+      } else if (selected.type === "ball") {
+        const newX = Math.max(config.ballRadius, Math.min(CANVAS_W - config.ballRadius, drag.origX + dx));
+        const newY = Math.max(config.ballRadius, Math.min(CANVAS_H - config.ballRadius, drag.origY + dy));
+        setLevel({ ...level, ball: { x: newX, y: newY } });
+        setDirty(true);
+      } else if (selected.type === "goal") {
+        const newX = Math.max(config.goalRadius, Math.min(CANVAS_W - config.goalRadius, drag.origX + dx));
+        const newY = Math.max(config.goalRadius, Math.min(CANVAS_H - config.goalRadius, drag.origY + dy));
+        setLevel({ ...level, goal: { x: newX, y: newY } });
+        setDirty(true);
+      } else if (selected.type === "star") {
+        const idx = selected.index;
+        const newX = Math.max(config.starRadius, Math.min(CANVAS_W - config.starRadius, drag.origX + dx));
+        const newY = Math.max(config.starRadius, Math.min(CANVAS_H - config.starRadius, drag.origY + dy));
+        const newStars = [...level.stars];
+        newStars[idx] = { ...newStars[idx], x: newX, y: newY };
+        setLevel({ ...level, stars: newStars });
+        setDirty(true);
+      } else if (selected.type === "obstacle") {
+        const idx = selected.index;
+        const ob = level.obstacles[idx];
+        const newX = Math.max(0, Math.min(CANVAS_W - ob.w, drag.origX + dx));
+        const newY = Math.max(0, Math.min(CANVAS_H - ob.h, drag.origY + dy));
+        const newObstacles = [...level.obstacles];
+        newObstacles[idx] = { ...ob, x: newX, y: newY };
+        setLevel({ ...level, obstacles: newObstacles });
+        setDirty(true);
+      }
+    }
+
+    function onUp() {
+      dragRef.current = null;
+    }
+
+    canvasEl.addEventListener("mousedown", onDown);
+    canvasEl.addEventListener("mousemove", onMove);
+    canvasEl.addEventListener("mouseup", onUp);
+    canvasEl.addEventListener("mouseleave", onUp);
+    canvasEl.addEventListener("touchstart", onDown, { passive: false });
+    canvasEl.addEventListener("touchmove", onMove, { passive: false });
+    canvasEl.addEventListener("touchend", onUp);
+    canvasEl.addEventListener("touchcancel", onUp);
+
+    return () => {
+      canvasEl.removeEventListener("mousedown", onDown);
+      canvasEl.removeEventListener("mousemove", onMove);
+      canvasEl.removeEventListener("mouseup", onUp);
+      canvasEl.removeEventListener("mouseleave", onUp);
+      canvasEl.removeEventListener("touchstart", onDown);
+      canvasEl.removeEventListener("touchmove", onMove);
+      canvasEl.removeEventListener("touchend", onUp);
+      canvasEl.removeEventListener("touchcancel", onUp);
+    };
+  }, [level, tool, selected, getPos]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(viewport.canvasWidth * dpr);
+    canvas.height = Math.floor(viewport.canvasHeight * dpr);
+  }, [viewport.canvasWidth, viewport.canvasHeight]);
+
+  const handleSave = useCallback(() => {
+    const levelToSave = updateStarRulesForLevel({
+      ...level,
+      name: levelName.trim() || "自定义关卡",
+    });
+    const saved = saveCustomLevel(levelToSave);
+    setLevel(saved);
+    setDirty(false);
+    setShowSaveSuccess(true);
+    setTimeout(() => setShowSaveSuccess(false), 2000);
+  }, [level, levelName]);
+
+  const handlePlay = useCallback(() => {
+    const levelToPlay = updateStarRulesForLevel({
+      ...level,
+      name: levelName.trim() || "自定义关卡",
+    });
+    setPlayLevel(JSON.parse(JSON.stringify(levelToPlay)));
+    setIsPlaying(true);
+  }, [level, levelName]);
+
+  const handleBackFromPlay = useCallback(() => {
+    setIsPlaying(false);
+    setPlayLevel(null);
+  }, []);
+
+  const handlePlayComplete = useCallback(() => {
+  }, []);
+
+  const handlePlayNext = useCallback(() => {
+  }, []);
+
+  const handleDeleteSelected = useCallback(() => {
+    if (!selected) return;
+    if (selected.type === "star") {
+      const newStars = level.stars.filter((_, i) => i !== selected.index);
+      const updated = updateStarRulesForLevel({ ...level, stars: newStars });
+      setLevel(updated);
+      setDirty(true);
+    } else if (selected.type === "obstacle") {
+      setLevel({
+        ...level,
+        obstacles: level.obstacles.filter((_, i) => i !== selected.index),
+      });
+      setDirty(true);
+    }
+    setSelected(null);
+  }, [selected, level]);
+
+  const handleMaxShotsChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseInt(e.target.value) || 1;
+    const clamped = Math.max(1, Math.min(20, val));
+    setLevel({ ...level, maxShots: clamped });
+    setDirty(true);
+  }, [level]);
+
+  const handleGravityChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseFloat(e.target.value) || 0.1;
+    const clamped = Math.max(0.05, Math.min(0.5, val));
+    setLevel({ ...level, gravity: parseFloat(clamped.toFixed(3)) });
+    setDirty(true);
+  }, [level]);
+
+  const handleBounceChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseFloat(e.target.value) || 0.5;
+    const clamped = Math.max(0.3, Math.min(0.95, val));
+    setLevel({ ...level, bounce: parseFloat(clamped.toFixed(2)) });
+    setDirty(true);
+  }, [level]);
+
+  if (isPlaying && playLevel) {
+    return (
+      <div className="editor-play-wrap">
+        <Game
+          key={`play-${playLevel.id}-${Date.now()}`}
+          level={playLevel}
+          progress={{}}
+          onBack={handleBackFromPlay}
+          onComplete={handlePlayComplete}
+          onNext={handlePlayNext}
+        />
+        <button className="btn-exit-play" onClick={handleBackFromPlay}>
+          ← 返回编辑
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="level-editor">
+      <div className="editor-header">
+        <div className="editor-header-left">
+          <button className="btn-back" onClick={onBack}>
+            ← 返回
+          </button>
+          <h2>关卡编辑器</h2>
+          {dirty && <span className="dirty-badge">未保存</span>}
+        </div>
+        <div className="editor-header-right">
+          <button className="btn-play" onClick={handlePlay}>
+            ▶ 试玩
+          </button>
+          <button className="btn-save" onClick={handleSave}>
+            💾 保存
+          </button>
+        </div>
+      </div>
+
+      <div className="editor-body">
+        <div className="editor-toolbar">
+          <div className="tool-section">
+            <div className="tool-section-title">工具</div>
+            <button
+              className={"tool-btn" + (tool === "select" ? " active" : "")}
+              onClick={() => setTool("select")}
+            >
+              🖱 选择
+            </button>
+            <button
+              className={"tool-btn" + (tool === "delete" ? " active" : "")}
+              onClick={() => setTool("delete")}
+            >
+              🗑 删除
+            </button>
+          </div>
+
+          <div className="tool-section">
+            <div className="tool-section-title">放置</div>
+            <button
+              className={"tool-btn tool-ball" + (tool === "ball" ? " active" : "")}
+              onClick={() => setTool("ball")}
+            >
+              🔵 出生点
+            </button>
+            <button
+              className={"tool-btn tool-goal" + (tool === "goal" ? " active" : "")}
+              onClick={() => setTool("goal")}
+            >
+              🟢 终点
+            </button>
+            <button
+              className={"tool-btn tool-star" + (tool === "star" ? " active" : "")}
+              onClick={() => setTool("star")}
+            >
+              ⭐ 星星
+            </button>
+            <button
+              className={"tool-btn tool-wall" + (tool === "wall" ? " active" : "")}
+              onClick={() => setTool("wall")}
+            >
+              🧱 墙体
+            </button>
+            <button
+              className={"tool-btn tool-onetime" + (tool === "oneTime" ? " active" : "")}
+              onClick={() => setTool("oneTime")}
+            >
+              💥 易碎
+            </button>
+            <button
+              className={"tool-btn tool-slow" + (tool === "slowZone" ? " active" : "")}
+              onClick={() => setTool("slowZone")}
+            >
+              ❄ 减速区
+            </button>
+          </div>
+        </div>
+
+        <div className="editor-canvas-wrap">
+          <div ref={viewport.containerRef} className="canvas-wrap editor-canvas">
+            <canvas ref={canvasRef} />
+          </div>
+          {showSaveSuccess && (
+            <div className="save-success-toast">✓ 保存成功</div>
+          )}
+        </div>
+
+        <div className="editor-properties">
+          <div className="prop-section">
+            <div className="prop-section-title">关卡设置</div>
+            <div className="prop-item">
+              <label>关卡名称</label>
+              <input
+                type="text"
+                value={levelName}
+                onChange={(e) => {
+                  setLevelName(e.target.value);
+                  setDirty(true);
+                }}
+                placeholder="输入关卡名称"
+              />
+            </div>
+            <div className="prop-item">
+              <label>弹射次数: {level.maxShots}</label>
+              <input
+                type="range"
+                min="1"
+                max="20"
+                value={level.maxShots}
+                onChange={handleMaxShotsChange}
+              />
+            </div>
+            <div className="prop-item">
+              <label>重力: {level.gravity.toFixed(3)}</label>
+              <input
+                type="range"
+                min="0.05"
+                max="0.5"
+                step="0.01"
+                value={level.gravity}
+                onChange={handleGravityChange}
+              />
+            </div>
+            <div className="prop-item">
+              <label>弹力: {level.bounce.toFixed(2)}</label>
+              <input
+                type="range"
+                min="0.3"
+                max="0.95"
+                step="0.05"
+                value={level.bounce}
+                onChange={handleBounceChange}
+              />
+            </div>
+          </div>
+
+          <div className="prop-section">
+            <div className="prop-section-title">元素统计</div>
+            <div className="stat-row">
+              <span>星星数量</span>
+              <span className="stat-value">{level.stars.length}</span>
+            </div>
+            <div className="stat-row">
+              <span>墙体障碍</span>
+              <span className="stat-value">
+                {level.obstacles.filter((o) => o.type === "wall").length}
+              </span>
+            </div>
+            <div className="stat-row">
+              <span>易碎障碍</span>
+              <span className="stat-value">
+                {level.obstacles.filter((o) => o.type === "oneTime").length}
+              </span>
+            </div>
+            <div className="stat-row">
+              <span>减速区域</span>
+              <span className="stat-value">
+                {level.obstacles.filter((o) => o.type === "slowZone").length}
+              </span>
+            </div>
+          </div>
+
+          {selected && (
+            <div className="prop-section">
+              <div className="prop-section-title">选中元素</div>
+              <div className="selected-info">
+                {selected.type === "ball" && <span>🔵 出生点</span>}
+                {selected.type === "goal" && <span>🟢 终点</span>}
+                {selected.type === "star" && <span>⭐ 星星 #{selected.index + 1}</span>}
+                {selected.type === "obstacle" && (
+                  <span>
+                    {level.obstacles[selected.index].type === "wall" && "🧱"}
+                    {level.obstacles[selected.index].type === "oneTime" && "💥"}
+                    {level.obstacles[selected.index].type === "slowZone" && "❄"}
+                    {" 障碍 #"}{(selected.index + 1)}
+                  </span>
+                )}
+              </div>
+              {(selected.type === "star" || selected.type === "obstacle") && (
+                <button className="btn-delete-selected" onClick={handleDeleteSelected}>
+                  🗑 删除此元素
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="prop-section">
+            <div className="prop-section-title">操作提示</div>
+            <div className="tips">
+              <p>• 选择工具后点击画布放置元素</p>
+              <p>• 使用选择工具拖动移动元素</p>
+              <p>• 拖动障碍四角调整大小</p>
+              <p>• 点击试玩按钮测试关卡</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
