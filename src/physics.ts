@@ -22,9 +22,14 @@ export interface ObstacleState {
   y: number;
   w: number;
   h: number;
-  type: "wall" | "oneTime" | "slowZone";
+  type: "wall" | "oneTime" | "slowZone" | "movingHorizontal" | "movingVertical";
   destroyed: boolean;
   destroyAnim: number;
+  baseX: number;
+  baseY: number;
+  moveRange: number;
+  moveSpeed: number;
+  movePhase: number;
 }
 
 export interface TrailPoint {
@@ -155,6 +160,11 @@ export function createPhysicsState(
       type: o.type || "wall",
       destroyed: false,
       destroyAnim: 0,
+      baseX: o.x,
+      baseY: o.y,
+      moveRange: o.moveRange || 0,
+      moveSpeed: o.moveSpeed !== undefined ? o.moveSpeed : 1.5,
+      movePhase: 0,
     })),
     trail: [],
     particles: [],
@@ -231,6 +241,22 @@ function stepPhysics(
     if (s.collectAnim > 0) s.collectAnim--;
   });
   if (state.goalAnim > 0) state.goalAnim--;
+
+  state.obstacles.forEach((o) => {
+    if (o.destroyed) return;
+    if (o.type !== "movingHorizontal" && o.type !== "movingVertical") return;
+    o.movePhase += o.moveSpeed;
+    if (o.movePhase > 100) {
+      o.movePhase = 0;
+    }
+    const t = (Math.sin((o.movePhase / 100) * Math.PI * 2) + 1) / 2;
+    const offset = t * o.moveRange;
+    if (o.type === "movingHorizontal") {
+      o.x = o.baseX + offset;
+    } else {
+      o.y = o.baseY + offset;
+    }
+  });
 
   updateParticles(state);
   updateShake(state);

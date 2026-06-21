@@ -8,7 +8,9 @@ export interface ObstacleDef {
   y: number;
   w: number;
   h: number;
-  type?: "wall" | "oneTime" | "slowZone";
+  type?: "wall" | "oneTime" | "slowZone" | "movingHorizontal" | "movingVertical";
+  moveRange?: number;
+  moveSpeed?: number;
 }
 
 export interface StarRules {
@@ -526,11 +528,23 @@ export function validateLevel(
   });
 
   level.obstacles.forEach((ob, index) => {
+    let minX = ob.x;
+    let minY = ob.y;
+    let maxX = ob.x + ob.w;
+    let maxY = ob.y + ob.h;
+    const range = ob.moveRange || 0;
+    if (ob.type === "movingHorizontal") {
+      minX = ob.x - range;
+      maxX = ob.x + ob.w + range;
+    } else if (ob.type === "movingVertical") {
+      minY = ob.y - range;
+      maxY = ob.y + ob.h + range;
+    }
     if (
-      ob.x < 0 ||
-      ob.y < 0 ||
-      ob.x + ob.w > CANVAS_W ||
-      ob.y + ob.h > CANVAS_H
+      minX < 0 ||
+      minY < 0 ||
+      maxX > CANVAS_W ||
+      maxY > CANVAS_H
     ) {
       issues.push({
         type: "obstacleOutOfBounds",

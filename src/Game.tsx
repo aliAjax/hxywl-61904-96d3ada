@@ -475,6 +475,43 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText("\u2744", ob.x + ob.w / 2, ob.y + ob.h / 2);
+        } else if (ob.type === "movingHorizontal" || ob.type === "movingVertical") {
+          const t = Date.now() / 500;
+          const dirArrow = ob.type === "movingHorizontal" ? "\u2194" : "\u2195";
+          const range = ob.moveRange || 0;
+
+          ctx.save();
+          ctx.globalAlpha = 0.25;
+          ctx.strokeStyle = "#22d3ee";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          if (ob.type === "movingHorizontal") {
+            ctx.strokeRect(ob.baseX - range, ob.y, ob.w + range * 2, ob.h);
+          } else {
+            ctx.strokeRect(ob.x, ob.baseY - range, ob.w, ob.h + range * 2);
+          }
+          ctx.setLineDash([]);
+          ctx.restore();
+
+          const obGrad = ctx.createLinearGradient(ob.x, ob.y, ob.x, ob.y + ob.h);
+          obGrad.addColorStop(0, "#0891b2");
+          obGrad.addColorStop(1, "#0e7490");
+          ctx.fillStyle = obGrad;
+          roundRect(ctx, ob.x, ob.y, ob.w, ob.h, 3);
+          ctx.fill();
+          ctx.strokeStyle = "#22d3ee";
+          ctx.lineWidth = 2;
+          roundRect(ctx, ob.x, ob.y, ob.w, ob.h, 3);
+          ctx.stroke();
+
+          ctx.save();
+          ctx.globalAlpha = 0.7 + Math.sin(t + idx) * 0.3;
+          ctx.fillStyle = "#a5f3fc";
+          ctx.font = "bold 14px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(dirArrow, ob.x + ob.w / 2, ob.y + ob.h / 2);
+          ctx.restore();
         }
       });
 

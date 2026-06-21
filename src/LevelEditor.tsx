@@ -17,7 +17,7 @@ import {
   updateStarRulesForLevel,
 } from "./customLevels";
 
-type Tool = "select" | "ball" | "goal" | "star" | "wall" | "oneTime" | "slowZone" | "delete";
+type Tool = "select" | "ball" | "goal" | "star" | "wall" | "oneTime" | "slowZone" | "movingHorizontal" | "movingVertical" | "delete";
 
 type SelectedItem =
   | { type: "ball" }
@@ -181,6 +181,34 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText("❄", ob.x + ob.w / 2, ob.y + ob.h / 2);
+        } else if (ob.type === "movingHorizontal" || ob.type === "movingVertical") {
+          const dirArrow = ob.type === "movingHorizontal" ? "↔" : "↕";
+          const range = ob.moveRange || 0;
+
+          ctx.save();
+          ctx.globalAlpha = 0.3;
+          ctx.strokeStyle = isSelected ? "#22d3ee" : "#0e7490";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          if (ob.type === "movingHorizontal") {
+            ctx.strokeRect(ob.x - range, ob.y, ob.w + range * 2, ob.h);
+          } else {
+            ctx.strokeRect(ob.x, ob.y - range, ob.w, ob.h + range * 2);
+          }
+          ctx.setLineDash([]);
+          ctx.restore();
+
+          ctx.fillStyle = isSelected ? "#06b6d4" : "#0891b2";
+          ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.strokeStyle = isSelected ? "#67e8f9" : "#22d3ee";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(ob.x, ob.y, ob.w, ob.h);
+
+          ctx.fillStyle = "rgba(255,255,255,0.9)";
+          ctx.font = "bold 14px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(dirArrow, ob.x + ob.w / 2, ob.y + ob.h / 2);
         }
 
         if (hasIssue) {
@@ -512,15 +540,19 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
           setLevel(updated);
           setSelected({ type: "star", index: newStars.length - 1 });
           setDirty(true);
-        } else if (tool === "wall" || tool === "oneTime" || tool === "slowZone") {
+        } else if (tool === "wall" || tool === "oneTime" || tool === "slowZone" || tool === "movingHorizontal" || tool === "movingVertical") {
           const defaultW = tool === "slowZone" ? 80 : 60;
           const defaultH = tool === "slowZone" ? 60 : 16;
+          const defaultRange = tool === "movingHorizontal" || tool === "movingVertical" ? 80 : 0;
+          const defaultSpeed = tool === "movingHorizontal" || tool === "movingVertical" ? 1.5 : undefined;
           const newOb: ObstacleDef = {
             x: clampedX - defaultW / 2,
             y: clampedY - defaultH / 2,
             w: defaultW,
             h: defaultH,
             type: tool,
+            moveRange: defaultRange,
+            moveSpeed: defaultSpeed,
           };
           setLevel({
             ...level,
@@ -882,6 +914,18 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
             >
               ❄ 减速区
             </button>
+            <button
+              className={"tool-btn tool-moveh" + (tool === "movingHorizontal" ? " active" : "")}
+              onClick={() => setTool("movingHorizontal")}
+            >
+              ↔ 水平移动
+            </button>
+            <button
+              className={"tool-btn tool-movev" + (tool === "movingVertical" ? " active" : "")}
+              onClick={() => setTool("movingVertical")}
+            >
+              ↕ 垂直移动
+            </button>
           </div>
         </div>
 
@@ -1031,6 +1075,18 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
                 {level.obstacles.filter((o) => o.type === "slowZone").length}
               </span>
             </div>
+            <div className="stat-row">
+              <span>水平移动</span>
+              <span className="stat-value">
+                {level.obstacles.filter((o) => o.type === "movingHorizontal").length}
+              </span>
+            </div>
+            <div className="stat-row">
+              <span>垂直移动</span>
+              <span className="stat-value">
+                {level.obstacles.filter((o) => o.type === "movingVertical").length}
+              </span>
+            </div>
           </div>
 
           {selected && (
@@ -1045,10 +1101,99 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
                     {level.obstacles[selected.index].type === "wall" && "🧱"}
                     {level.obstacles[selected.index].type === "oneTime" && "💥"}
                     {level.obstacles[selected.index].type === "slowZone" && "❄"}
+                    {level.obstacles[selected.index].type === "movingHorizontal" && "↔"}
+                    {level.obstacles[selected.index].type === "movingVertical" && "↕"}
                     {" 障碍 #"}{(selected.index + 1)}
                   </span>
                 )}
               </div>
+              {selected.type === "obstacle" &&
+                (level.obstacles[selected.index].type === "movingHorizontal" ||
+                  level.obstacles[selected.index].type === "movingVertical") && (
+                  <>
+                    <div className="prop-item">
+                      <div className="prop-label-row">
+                        <label>移动范围</label>
+                        <input
+                          type="number"
+                          className="prop-number-input"
+                          min="0"
+                          max="300"
+                          step="5"
+                          value={level.obstacles[selected.index].moveRange || 0}
+                          onChange={(e) => {
+                            const idx = selected.index;
+                            const val = parseInt(e.target.value) || 0;
+                            const clamped = Math.max(0, Math.min(300, val));
+                            const newObstacles = [...level.obstacles];
+                            newObstacles[idx] = { ...newObstacles[idx], moveRange: clamped };
+                            setLevel({ ...level, obstacles: newObstacles });
+                            setDirty(true);
+                          }}
+                        />
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="300"
+                        step="5"
+                        value={level.obstacles[selected.index].moveRange || 0}
+                        onChange={(e) => {
+                          const idx = selected.index;
+                          const val = parseInt(e.target.value) || 0;
+                          const newObstacles = [...level.obstacles];
+                          newObstacles[idx] = { ...newObstacles[idx], moveRange: val };
+                          setLevel({ ...level, obstacles: newObstacles });
+                          setDirty(true);
+                        }}
+                      />
+                    </div>
+                    <div className="prop-item">
+                      <div className="prop-label-row">
+                        <label>移动速度</label>
+                        <input
+                          type="number"
+                          className="prop-number-input"
+                          min="0.1"
+                          max="5"
+                          step="0.1"
+                          value={level.obstacles[selected.index].moveSpeed || 1.5}
+                          onChange={(e) => {
+                            const idx = selected.index;
+                            const val = parseFloat(e.target.value);
+                            if (isNaN(val)) return;
+                            const clamped = Math.max(0.1, Math.min(5, val));
+                            const newObstacles = [...level.obstacles];
+                            newObstacles[idx] = {
+                              ...newObstacles[idx],
+                              moveSpeed: parseFloat(clamped.toFixed(2)),
+                            };
+                            setLevel({ ...level, obstacles: newObstacles });
+                            setDirty(true);
+                          }}
+                        />
+                      </div>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="5"
+                        step="0.1"
+                        value={level.obstacles[selected.index].moveSpeed || 1.5}
+                        onChange={(e) => {
+                          const idx = selected.index;
+                          const val = parseFloat(e.target.value) || 0.1;
+                          const newObstacles = [...level.obstacles];
+                          newObstacles[idx] = {
+                            ...newObstacles[idx],
+                            moveSpeed: parseFloat(val.toFixed(2)),
+                          };
+                          setLevel({ ...level, obstacles: newObstacles });
+                          setDirty(true);
+                        }}
+                      />
+                    </div>
+                  </>
+                )}
               {(selected.type === "star" || selected.type === "obstacle") && (
                 <button className="btn-delete-selected" onClick={handleDeleteSelected}>
                   🗑 删除此元素
