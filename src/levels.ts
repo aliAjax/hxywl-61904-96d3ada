@@ -437,3 +437,156 @@ export const levels: LevelDef[] = [
     },
   },
 ];
+
+export type ValidationIssueType =
+  | "ballOutOfBounds"
+  | "goalOutOfBounds"
+  | "starOutOfBounds"
+  | "obstacleOutOfBounds"
+  | "obstacleBlocksBall"
+  | "obstacleBlocksGoal"
+  | "noReachableGoal";
+
+export interface ValidationIssue {
+  type: ValidationIssueType;
+  message: string;
+  target:
+    | { kind: "ball" }
+    | { kind: "goal" }
+    | { kind: "star"; index: number }
+    | { kind: "obstacle"; index: number };
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  issues: ValidationIssue[];
+}
+
+export function validateLevel(
+  level: LevelDef,
+  ballRadius: number,
+  goalRadius: number,
+  starRadius: number
+): ValidationResult {
+  const issues: ValidationIssue[] = [];
+
+  if (
+    level.ball.x - ballRadius < 0 ||
+    level.ball.x + ballRadius > CANVAS_W ||
+    level.ball.y - ballRadius < 0 ||
+    level.ball.y + ballRadius > CANVAS_H
+  ) {
+    issues.push({
+      type: "ballOutOfBounds",
+      message: "出生点（小球）越界了",
+      target: { kind: "ball" },
+    });
+  }
+
+  if (
+    level.goal.x - goalRadius < 0 ||
+    level.goal.x + goalRadius > CANVAS_W ||
+    level.goal.y - goalRadius < 0 ||
+    level.goal.y + goalRadius > CANVAS_H
+  ) {
+    issues.push({
+      type: "goalOutOfBounds",
+      message: "终点越界了",
+      target: { kind: "goal" },
+    });
+  }
+
+  level.stars.forEach((star, index) => {
+    if (
+      star.x - starRadius < 0 ||
+      star.x + starRadius > CANVAS_W ||
+      star.y - starRadius < 0 ||
+      star.y + starRadius > CANVAS_H
+    ) {
+      issues.push({
+        type: "starOutOfBounds",
+        message: `星星 #${index + 1} 越界了`,
+        target: { kind: "star", index },
+      });
+    }
+  });
+
+  level.obstacles.forEach((ob, index) => {
+    if (
+      ob.x < 0 ||
+      ob.y < 0 ||
+      ob.x + ob.w > CANVAS_W ||
+      ob.y + ob.h > CANVAS_H
+    ) {
+      issues.push({
+        type: "obstacleOutOfBounds",
+        message: `障碍 #${index + 1} 越界了`,
+        target: { kind: "obstacle", index },
+      });
+    }
+  });
+
+  level.obstacles.forEach((ob, index) => {
+    if (ob.type === "slowZone") return;
+
+    const closestX = Math.max(ob.x, Math.min(level.ball.x, ob.x + ob.w));
+    const closestY = Math.max(ob.y, Math.min(level.ball.y, ob.y + ob.h));
+    const dx = level.ball.x - closestX;
+    const dy = level.ball.y - closestY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < ballRadius) {
+      issues.push({
+        type: "obstacleBlocksBall",
+        message: `障碍 #${index + 1} 挡住了出生点`,
+        target: { kind: "obstacle", index },
+      });
+    }
+  });
+
+  level.obstacles.forEach((ob, index) => {
+    if (ob.type === "slowZone") return;
+
+    const closestX = Math.max(ob.x, Math.min(level.goal.x, ob.x + ob.w));
+    const closestY = Math.max(ob.y, Math.min(level.goal.y, ob.y + ob.h));
+    const dx = level.goal.x - closestX;
+    const dy = level.goal.y - closestY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < goalRadius) {
+      issues.push({
+        type: "obstacleBlocksGoal",
+        message: `障碍 #${index + 1} 挡住了终点`,
+        target: { kind: "obstacle", index },
+      });
+    }
+  });
+
+  const hasBlockingObstacleOnGoal = level.obstacles.some((ob) => {
+    if (ob.type === "slowZone") return false;
+    const closestX = Math.max(ob.x, Math.min(level.goal.x, ob.x + ob.w));
+    const closestY = Math.max(ob.y, Math.min(level.goal.y, ob.y + ob.h));
+    const dx = level.goal.x - closestX;
+    const dy = level.goal.y - closestY;
+    return Math.sqrt(dx * dx + dy * dy) < goalRadius;
+  });
+
+  const goalOutOfBounds =
+    level.goal.x - goalRadius < 0 ||
+    level.goal.x + goalRadius > CANVAS_W ||
+    level.goal.y - goalRadius < 0 ||
+    level.goal.y + goalRadius > CANVAS_H;
+
+  if (hasBlockingObstacleOnGoal || goalOutOfBounds) {
+    issues.push({
+      type: "noReachableGoal",
+      message: "关卡没有可用的终点",
+      target: { kind: "goal" },
+    });
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}

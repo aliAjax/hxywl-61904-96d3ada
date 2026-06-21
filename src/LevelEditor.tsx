@@ -1,5 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { LevelDef, StarDef, ObstacleDef, CANVAS_W, CANVAS_H } from "./levels";
+import {
+  LevelDef,
+  StarDef,
+  ObstacleDef,
+  CANVAS_W,
+  CANVAS_H,
+  validateLevel,
+  ValidationIssue,
+  ValidationResult,
+} from "./levels";
 import { useGameViewport, screenToWorld, ViewportInfo } from "./useGameViewport";
 import { DEFAULT_CONFIG, PhysicsConfig } from "./physics";
 import Game from "./Game";
@@ -41,6 +50,8 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
     gravity?: string;
     bounce?: string;
   }>({});
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+  const [showPlayWarning, setShowPlayWarning] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewport = useGameViewport();
@@ -61,6 +72,16 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
   useEffect(() => {
     setLevelName(level.name);
   }, [level.name]);
+
+  useEffect(() => {
+    const result = validateLevel(
+      level,
+      config.ballRadius,
+      config.goalRadius,
+      config.starRadius
+    );
+    setValidationResult(result);
+  }, [level]);
 
   const validateName = (val: string): string | undefined => {
     const trimmed = val.trim();
@@ -125,6 +146,8 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
 
       level.obstacles.forEach((ob, idx) => {
         const isSelected = selected?.type === "obstacle" && selected.index === idx;
+        const hasIssue = hasObstacleIssue(idx);
+        const issuePulse = hasIssue ? 1 + Math.sin(Date.now() / 200) * 0.15 : 1;
 
         if (ob.type === "wall") {
           ctx.fillStyle = isSelected ? "#60a5fa" : "#475569";
@@ -160,6 +183,16 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
           ctx.fillText("❄", ob.x + ob.w / 2, ob.y + ob.h / 2);
         }
 
+        if (hasIssue) {
+          ctx.save();
+          ctx.strokeStyle = "#ef4444";
+          ctx.lineWidth = 3 * issuePulse;
+          ctx.shadowColor = "#ef4444";
+          ctx.shadowBlur = 8;
+          ctx.strokeRect(ob.x - 2, ob.y - 2, ob.w + 4, ob.h + 4);
+          ctx.restore();
+        }
+
         if (isSelected) {
           drawResizeHandles(ctx, ob.x, ob.y, ob.w, ob.h);
         }
@@ -168,6 +201,19 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
       const goalPulse = 1 + Math.sin(Date.now() / 400) * 0.05;
       const goalR = config.goalRadius * goalPulse;
       const goalSelected = selected?.type === "goal";
+      const goalHasIssue = hasGoalIssue();
+
+      if (goalHasIssue) {
+        ctx.save();
+        ctx.strokeStyle = "#ef4444";
+        ctx.lineWidth = 4;
+        ctx.shadowColor = "#ef4444";
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(level.goal.x, level.goal.y, goalR + 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
 
       ctx.beginPath();
       ctx.arc(level.goal.x, level.goal.y, goalR, 0, Math.PI * 2);
@@ -190,9 +236,22 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
 
       level.stars.forEach((star, idx) => {
         const isSelected = selected?.type === "star" && selected.index === idx;
+        const hasIssue = hasStarIssue(idx);
         const t = Date.now() / 500;
         const pulse = 1 + Math.sin(t + star.x * 0.01) * 0.05;
         const sr = config.starRadius * pulse;
+
+        if (hasIssue) {
+          ctx.save();
+          ctx.strokeStyle = "#ef4444";
+          ctx.lineWidth = 3;
+          ctx.shadowColor = "#ef4444";
+          ctx.shadowBlur = 10;
+          ctx.beginPath();
+          ctx.arc(star.x, star.y, sr + 5, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
 
         ctx.beginPath();
         ctx.arc(star.x, star.y, sr, 0, Math.PI * 2);
@@ -212,6 +271,20 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
       });
 
       const ballSelected = selected?.type === "ball";
+      const ballHasIssue = hasBallIssue();
+
+      if (ballHasIssue) {
+        ctx.save();
+        ctx.strokeStyle = "#ef4444";
+        ctx.lineWidth = 3;
+        ctx.shadowColor = "#ef4444";
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(level.ball.x, level.ball.y, config.ballRadius + 5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       ctx.beginPath();
       ctx.arc(level.ball.x, level.ball.y, config.ballRadius, 0, Math.PI * 2);
       const ballGrad = ctx.createRadialGradient(-3, -3, 2, 0, 0, config.ballRadius);
@@ -259,6 +332,35 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
       ctx.lineWidth = 1.5;
       ctx.strokeRect(h.x - size / 2, h.y - size / 2, size, size);
     });
+  }
+
+  function hasObstacleIssue(index: number): boolean {
+    if (!validationResult) return false;
+    return validationResult.issues.some(
+      (issue) =>
+        issue.target.kind === "obstacle" && issue.target.index === index
+    );
+  }
+
+  function hasStarIssue(index: number): boolean {
+    if (!validationResult) return false;
+    return validationResult.issues.some(
+      (issue) => issue.target.kind === "star" && issue.target.index === index
+    );
+  }
+
+  function hasBallIssue(): boolean {
+    if (!validationResult) return false;
+    return validationResult.issues.some(
+      (issue) => issue.target.kind === "ball"
+    );
+  }
+
+  function hasGoalIssue(): boolean {
+    if (!validationResult) return false;
+    return validationResult.issues.some(
+      (issue) => issue.target.kind === "goal"
+    );
   }
 
   function getResizeHandle(x: number, y: number, ob: ObstacleDef): string | null {
@@ -544,6 +646,10 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
 
     if (Object.keys(newErrors).length > 0) return;
 
+    if (validationResult && !validationResult.valid) {
+      return;
+    }
+
     const levelToSave = updateStarRulesForLevel({
       ...level,
       name: trimmedName || "自定义关卡",
@@ -554,9 +660,24 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
     setShowSaveSuccess(true);
     setTimeout(() => setShowSaveSuccess(false), 2000);
     onSave(saved);
-  }, [level, levelName, onSave]);
+  }, [level, levelName, onSave, validationResult]);
 
   const handlePlay = useCallback(() => {
+    if (validationResult && !validationResult.valid) {
+      setShowPlayWarning(true);
+      return;
+    }
+    const trimmedName = levelName.trim();
+    const levelToPlay = updateStarRulesForLevel({
+      ...level,
+      name: trimmedName || "自定义关卡",
+    });
+    setPlayLevel(JSON.parse(JSON.stringify(levelToPlay)));
+    setIsPlaying(true);
+  }, [level, levelName, validationResult]);
+
+  const handleConfirmPlay = useCallback(() => {
+    setShowPlayWarning(false);
     const trimmedName = levelName.trim();
     const levelToPlay = updateStarRulesForLevel({
       ...level,
@@ -565,6 +686,10 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
     setPlayLevel(JSON.parse(JSON.stringify(levelToPlay)));
     setIsPlaying(true);
   }, [level, levelName]);
+
+  const handleCancelPlay = useCallback(() => {
+    setShowPlayWarning(false);
+  }, []);
 
   const handleBackFromPlay = useCallback(() => {
     setIsPlaying(false);
@@ -691,7 +816,11 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
           <button className="btn-play" onClick={handlePlay}>
             ▶ 试玩
           </button>
-          <button className="btn-save" onClick={handleSave}>
+          <button
+            className="btn-save"
+            onClick={handleSave}
+            disabled={validationResult ? !validationResult.valid : false}
+          >
             💾 保存
           </button>
         </div>
@@ -848,6 +977,36 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
             </div>
           </div>
 
+          {validationResult && !validationResult.valid && (
+            <div className="prop-section validation-section">
+              <div className="prop-section-title validation-title">
+                ⚠️ 布局问题 ({validationResult.issues.length})
+              </div>
+              <div className="validation-issues">
+                {validationResult.issues.map((issue, idx) => (
+                  <div
+                    key={idx}
+                    className="validation-issue-item"
+                    onClick={() => {
+                      if (issue.target.kind === "ball") {
+                        setSelected({ type: "ball" });
+                      } else if (issue.target.kind === "goal") {
+                        setSelected({ type: "goal" });
+                      } else if (issue.target.kind === "star") {
+                        setSelected({ type: "star", index: issue.target.index });
+                      } else if (issue.target.kind === "obstacle") {
+                        setSelected({ type: "obstacle", index: issue.target.index });
+                      }
+                    }}
+                  >
+                    <span className="issue-icon">⚠</span>
+                    <span className="issue-text">{issue.message}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="prop-section">
             <div className="prop-section-title">元素统计</div>
             <div className="stat-row">
@@ -909,6 +1068,34 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
           </div>
         </div>
       </div>
+
+      {showPlayWarning && (
+        <div className="play-warning-overlay">
+          <div className="play-warning-card">
+            <div className="play-warning-icon">⚠️</div>
+            <h3 className="play-warning-title">布局存在风险</h3>
+            <p className="play-warning-desc">
+              当前关卡布局存在以下问题，试玩可能无法正常进行：
+            </p>
+            <div className="play-warning-issues">
+              {validationResult?.issues.map((issue, idx) => (
+                <div key={idx} className="play-warning-issue">
+                  <span className="warning-bullet">•</span>
+                  <span>{issue.message}</span>
+                </div>
+              ))}
+            </div>
+            <div className="play-warning-actions">
+              <button className="btn-cancel-play" onClick={handleCancelPlay}>
+                返回编辑
+              </button>
+              <button className="btn-confirm-play" onClick={handleConfirmPlay}>
+                继续试玩
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
