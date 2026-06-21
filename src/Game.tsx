@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { LevelDef, CANVAS_W, CANVAS_H, levels, calculateEarnedStars } from "./levels";
+import { LevelDef, CANVAS_W, CANVAS_H, levels, calculateEarnedStars, checkStarRuleAchieved } from "./levels";
 import { Progress, getStars, isTutorialCompleted, setTutorialCompleted } from "./progress";
 import Tutorial, { TutorialStep } from "./Tutorial";
 import { useGameViewport, screenToWorld, ViewportInfo } from "./useGameViewport";
@@ -46,6 +46,8 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
   const [collected, setCollected] = useState(0);
   const [resultStars, setResultStars] = useState(0);
   const [remainingShots, setRemainingShots] = useState(level.maxShots);
+  const [shotsUsed, setShotsUsed] = useState(0);
+  const [distanceToGoal, setDistanceToGoal] = useState(0);
   const [showResult, setShowResult] = useState(false);
   const [isNewRecord, setIsNewRecord] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -59,7 +61,14 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       s.phase = "done";
       setPhase("done");
       const remaining = s.shotsRemaining;
+      const used = s.shotsUsed;
       setRemainingShots(remaining);
+      setShotsUsed(used);
+      if (!cleared) {
+        const dx = s.ball.x - level.goal.x;
+        const dy = s.ball.y - level.goal.y;
+        setDistanceToGoal(Math.round(Math.sqrt(dx * dx + dy * dy)));
+      }
       const earnedStars = calculateEarnedStars(
         level,
         s.collected,
@@ -100,6 +109,8 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     setCollected(0);
     setResultStars(0);
     setRemainingShots(level.maxShots);
+    setShotsUsed(0);
+    setDistanceToGoal(0);
     setIsNewRecord(false);
     setShowResult(false);
     setPhase("aim");
@@ -130,6 +141,28 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     setIsPaused(false);
     onBack();
   }, [onBack]);
+
+  function getFailSuggestions(): string[] {
+    const suggestions: string[] = [];
+    const maxDist = Math.sqrt(CANVAS_W * CANVAS_W + CANVAS_H * CANVAS_H);
+    const distPct = distanceToGoal / maxDist;
+    if (distPct < 0.15) {
+      suggestions.push("你离终点已经很近了，尝试微调弹射角度");
+    } else if (distPct < 0.35) {
+      suggestions.push("尝试利用墙体反弹到达终点");
+    } else {
+      suggestions.push("规划一条更直接的路线前往终点");
+    }
+    if (collected === 0 && level.stars.length > 0) {
+      suggestions.push("尝试规划路径收集沿途星星");
+    } else if (collected < level.stars.length) {
+      suggestions.push("还有未收集的星星，试试不同的弹射路径");
+    }
+    if (shotsUsed > level.maxShots * 0.7) {
+      suggestions.push("减少弹射次数可以获得更高星级");
+    }
+    return suggestions;
+  }
 
   const tutorialSteps: TutorialStep[] = [
     {
@@ -817,60 +850,116 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       {showResult && (
         <div className="result-overlay">
           <div className="result-card">
-            <h3 className={stateRef.current.cleared ? "result-title success" : "result-title fail"}>
-              {stateRef.current.cleared ? "🎉 通关成功" : "💀 弹射耗尽"}
-            </h3>
-            {isNewRecord && stateRef.current.cleared && (
-              <div className="new-record-badge">🏆 新纪录！</div>
-            )}
-            <div className="result-stars">
-              {[1, 2, 3].map((i) => (
-                <span
-                  key={i}
-                  className={
-                    "star " + (i <= resultStars ? "filled" : "empty") +
-                    (isNewRecord && i <= resultStars ? " animate-star" : "")
-                  }
-                >
-                  ★
-                </span>
-              ))}
-            </div>
-            <div className="result-stats">
-              <div className="result-stat-item">
-                <span className="result-stat-label">收集星星</span>
-                <span className="result-stat-value">
-                  <span className="star-icon">★</span>
-                  {collected} / {level.stars.length}
-                </span>
-              </div>
-              <div className="result-stat-item">
-                <span className="result-stat-label">剩余弹射</span>
-                <span className="result-stat-value shots-value">
-                  {remainingShots} / {level.maxShots}
-                </span>
-              </div>
-              <div className="result-stat-item">
-                <span className="result-stat-label">最终星级</span>
-                <span className="result-stat-value stars-value">
-                  {resultStars} / 3
-                </span>
-              </div>
-              {prevBestStars > 0 && (
-                <div className="result-stat-item best-record">
-                  <span className="result-stat-label">历史最佳</span>
-                  <span className="result-stat-value">
-                    <span className="star-icon">★</span>
-                    {prevBestStars} / 3
-                  </span>
+            {stateRef.current.cleared ? (
+              <>
+                <h3 className="result-title success">🎉 通关成功</h3>
+                {isNewRecord && (
+                  <div className="new-record-badge">🏆 新纪录！</div>
+                )}
+                <div className="result-stars">
+                  {[1, 2, 3].map((i) => (
+                    <span
+                      key={i}
+                      className={
+                        "star " + (i <= resultStars ? "filled" : "empty") +
+                        (isNewRecord && i <= resultStars ? " animate-star" : "")
+                      }
+                    >
+                      ★
+                    </span>
+                  ))}
                 </div>
-              )}
-            </div>
+                <div className="result-stats">
+                  <div className="result-stat-item">
+                    <span className="result-stat-label">弹射次数</span>
+                    <span className="result-stat-value">
+                      {shotsUsed} / {level.maxShots}
+                    </span>
+                  </div>
+                  <div className="result-stat-item">
+                    <span className="result-stat-label">收集星星</span>
+                    <span className="result-stat-value">
+                      <span className="star-icon">★</span>
+                      {collected} / {level.stars.length}
+                    </span>
+                  </div>
+                  <div className="result-stat-item">
+                    <span className="result-stat-label">获得星级</span>
+                    <span className="result-stat-value stars-value">
+                      {resultStars} / 3
+                    </span>
+                  </div>
+                  {prevBestStars > 0 && (
+                    <div className="result-stat-item best-record">
+                      <span className="result-stat-label">历史最佳</span>
+                      <span className="result-stat-value">
+                        <span className="star-icon">★</span>
+                        {prevBestStars} / 3
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="result-rule-breakdown">
+                  <div className="rule-breakdown-title">星级规则达成状态</div>
+                  {level.starRules.stars.map((rule, i) => {
+                    const achieved = checkStarRuleAchieved(
+                      rule, collected, shotsUsed, remainingShots, true
+                    );
+                    return (
+                      <div
+                        key={i}
+                        className={"rule-breakdown-item" + (achieved ? " achieved" : " missed")}
+                      >
+                        <span className={"rule-breakdown-star " + (achieved ? "filled" : "empty")}>★</span>
+                        <span className="rule-breakdown-desc">{rule.description}</span>
+                        <span className={"rule-breakdown-status " + (achieved ? "pass" : "fail")}>
+                          {achieved ? "✓" : "✗"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="result-title fail">💀 弹射耗尽</h3>
+                <div className="result-stats fail-stats">
+                  <div className="result-stat-item">
+                    <span className="result-stat-label">距离终点</span>
+                    <span className="result-stat-value distance-value">
+                      {distanceToGoal}
+                    </span>
+                  </div>
+                  <div className="result-stat-item">
+                    <span className="result-stat-label">已收集星星</span>
+                    <span className="result-stat-value">
+                      <span className="star-icon">★</span>
+                      {collected} / {level.stars.length}
+                    </span>
+                  </div>
+                  <div className="result-stat-item">
+                    <span className="result-stat-label">弹射次数</span>
+                    <span className="result-stat-value">
+                      {shotsUsed} / {level.maxShots}
+                    </span>
+                  </div>
+                </div>
+                <div className="fail-suggestions">
+                  <div className="fail-suggestions-title">💡 推荐操作</div>
+                  {getFailSuggestions().map((s, i) => (
+                    <div key={i} className="fail-suggestion-item">
+                      <span className="suggestion-bullet">›</span>
+                      <span>{s}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
             <div className="result-actions">
               <button className="btn-retry" onClick={handleRetry}>
                 🔄 重新挑战
               </button>
-              {hasNextLevel && (
+              {stateRef.current.cleared && hasNextLevel && (
                 <button className="btn-next" onClick={onNext}>
                   下一关 →
                 </button>

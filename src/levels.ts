@@ -39,6 +39,20 @@ const H = 500;
 export const CANVAS_W = W;
 export const CANVAS_H = H;
 
+export function checkStarRuleAchieved(
+  rule: StarRules["stars"][0],
+  collected: number,
+  shotsUsed: number,
+  remainingShots: number,
+  cleared: boolean
+): boolean {
+  if (!cleared) return false;
+  if (rule.minCollected !== undefined && collected < rule.minCollected) return false;
+  if (rule.maxShotsUsed !== undefined && shotsUsed > rule.maxShotsUsed) return false;
+  if (rule.minRemainingShots !== undefined && remainingShots < rule.minRemainingShots) return false;
+  return true;
+}
+
 export function calculateEarnedStars(
   level: LevelDef,
   collected: number,
