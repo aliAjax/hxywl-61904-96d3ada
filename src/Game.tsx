@@ -60,6 +60,24 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
   const [showReplay, setShowReplay] = useState(false);
   const [savedThisRun, setSavedThisRun] = useState(false);
 
+  const replayTrajectories: ReplayShotTrajectory[] = useMemo(() => {
+    if (!bestRoute || !showReplay) return [];
+    return simulateRoute(level, config, bestRoute);
+  }, [bestRoute, showReplay, level.id]);
+
+  const replayTrajectoriesRef = useRef<ReplayShotTrajectory[]>([]);
+  replayTrajectoriesRef.current = replayTrajectories;
+
+  const showTutorialRef = useRef(false);
+  showTutorialRef.current = showTutorial;
+  const showStarRulesRef = useRef(false);
+  showStarRulesRef.current = showStarRules;
+  const showResultRef = useRef(false);
+  showResultRef.current = showResult;
+
+  const handlePauseRef = useRef<() => void>(() => {});
+  const handleResumeRef = useRef<() => void>(() => {});
+
   const finishLevel = useCallback(
     (cleared: boolean) => {
       const engine = engineRef.current;
@@ -154,6 +172,9 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     setIsPaused(false);
   }, []);
 
+  handlePauseRef.current = handlePause;
+  handleResumeRef.current = handleResume;
+
   const handlePauseRetry = useCallback(() => {
     isPausedRef.current = false;
     setIsPaused(false);
@@ -187,11 +208,6 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     }
     return suggestions;
   }
-
-  const replayTrajectories: ReplayShotTrajectory[] = useMemo(() => {
-    if (!bestRoute || !showReplay) return [];
-    return simulateRoute(level, config, bestRoute);
-  }, [bestRoute, showReplay, level.id]);
 
   const tutorialSteps: TutorialStep[] = [
     {
@@ -261,12 +277,12 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       },
       onKeyDown: (key) => {
         if (key === "Escape") {
-          if (showTutorial || showStarRules) return;
-          if (showResult) return;
+          if (showTutorialRef.current || showStarRulesRef.current) return;
+          if (showResultRef.current) return;
           if (isPausedRef.current) {
-            handleResume();
+            handleResumeRef.current();
           } else {
-            handlePause();
+            handlePauseRef.current();
           }
         }
       },
@@ -292,7 +308,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
 
       rend.render(eng.getState(), eng.getLevel(), eng.getConfig(), {
         dragState: dragRef.current,
-        replayTrajectories,
+        replayTrajectories: replayTrajectoriesRef.current,
         shotRecordsCount: eng.getShotRecords().length,
       });
 
@@ -309,7 +325,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       rendererRef.current = null;
       inputRef.current = null;
     };
-  }, [level.id, initEngine, replayTrajectories, showTutorial, showStarRules, showResult, handlePause, handleResume]);
+  }, [level.id, initEngine]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
