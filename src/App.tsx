@@ -1,12 +1,11 @@
 import { useState, useCallback, useRef } from "react";
 import "./styles.css";
 import { levels, LevelDef } from "./levels";
-import { Progress, loadProgress, updateLevelResult } from "./progress";
+import { Progress, updateLevelResult } from "./progress";
 import LevelSelect from "./LevelSelect";
 import Game from "./Game";
 import LevelEditor from "./LevelEditor";
 import {
-  loadCustomLevels,
   getNextCustomId,
   createEmptyLevel,
   deleteCustomLevel,
@@ -14,6 +13,8 @@ import {
   importLevel,
   ImportResult,
 } from "./customLevels";
+import { useDataStore } from "./useDataStore";
+import DataRecoveryNotice from "./DataRecoveryNotice";
 
 const GAME_ID = "hxywl-61904";
 
@@ -23,17 +24,29 @@ type View =
   | { kind: "editor"; levelId?: number; isNew: boolean };
 
 function App() {
-  const [progress, setProgress] = useState<Progress>(loadProgress);
+  const {
+    data,
+    recovery,
+    recoveryMessage,
+    showRecoveryNotice,
+    dismissRecoveryNotice,
+    resetAllData,
+    refreshData,
+    isReady,
+  } = useDataStore();
+
+  const progress: Progress = data.progress;
+  const customLevels: LevelDef[] = data.customLevels;
+
   const [view, setView] = useState<View>({ kind: "select" });
-  const [customLevels, setCustomLevels] = useState<LevelDef[]>(loadCustomLevels);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const allLevels = [...levels, ...customLevels];
 
   const refreshCustomLevels = useCallback(() => {
-    setCustomLevels(loadCustomLevels());
-  }, []);
+    refreshData();
+  }, [refreshData]);
 
   const handleSelect = useCallback((levelId: number) => {
     setView({ kind: "play", levelId });
@@ -46,9 +59,10 @@ function App() {
 
   const handleComplete = useCallback(
     (levelId: number, stars: number, cleared: boolean) => {
-      setProgress((prev) => updateLevelResult(prev, levelId, stars, cleared));
+      updateLevelResult(progress, levelId, stars, cleared);
+      refreshData();
     },
-    []
+    [progress, refreshData]
   );
 
   const handleNext = useCallback(() => {
@@ -120,6 +134,22 @@ function App() {
         : customLevels.find((l) => l.id === view.levelId) || createEmptyLevel(getNextCustomId())
       : null;
 
+  if (!isReady) {
+    return (
+      <main className="game-shell">
+        <section className="hero">
+          <p>{GAME_ID} · H5Game</p>
+          <h1>弹射星球</h1>
+          <span>正在加载游戏数据...</span>
+        </section>
+        <div className="loading-indicator">
+          <div className="loading-spinner"></div>
+          <p>加载中，请稍候...</p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="game-shell">
       <section className="hero">
@@ -128,17 +158,36 @@ function App() {
         <span>拖动蓄力弹射小球，收集星星抵达终点</span>
       </section>
 
-      {view.kind === "select" && (
-        <LevelSelect
-          progress={progress}
-          onSelect={handleSelect}
-          onCreateLevel={handleCreateLevel}
-          onEditLevel={handleEditLevel}
-          onDeleteLevel={handleDeleteLevel}
-          onExportLevel={handleExportLevel}
-          onImportLevel={handleImportLevel}
-          customLevels={customLevels}
+      {showRecoveryNotice && (
+        <DataRecoveryNotice
+          recovery={recovery}
+          message={recoveryMessage}
+          onDismiss={dismissRecoveryNotice}
         />
+      )}
+
+      {view.kind === "select" && (
+        <>
+          <LevelSelect
+            progress={progress}
+            onSelect={handleSelect}
+            onCreateLevel={handleCreateLevel}
+            onEditLevel={handleEditLevel}
+            onDeleteLevel={handleDeleteLevel}
+            onExportLevel={handleExportLevel}
+            onImportLevel={handleImportLevel}
+            customLevels={customLevels}
+          />
+          <div className="data-management-section">
+            <button
+              className="btn-data-management btn-reset-data"
+              onClick={resetAllData}
+              title="清除所有游戏数据，恢复到初始状态"
+            >
+              🗑 重置所有数据
+            </button>
+          </div>
+        </>
       )}
 
       {view.kind === "play" && currentLevel && (

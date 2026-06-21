@@ -8,8 +8,8 @@ import {
   normalizeLevel,
   validateObstacleFields,
 } from "./levels";
+import { dataStore } from "./dataStore";
 
-const CUSTOM_LEVELS_KEY = "hxywl-61904-custom-levels";
 const CUSTOM_LEVEL_ID_START = 1000;
 const EXPORT_VERSION = 1;
 const EXPORT_PREFIX = "HXYWL_LEVEL";
@@ -196,22 +196,11 @@ export function importLevel(fileContent: string): ImportResult {
 }
 
 export function loadCustomLevels(): LevelDef[] {
-  try {
-    const raw = localStorage.getItem(CUSTOM_LEVELS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed.map((l) => normalizeLevel(l as LevelDef));
-      }
-    }
-  } catch {}
-  return [];
+  return dataStore.getCurrentData().customLevels;
 }
 
 export function saveCustomLevels(levels: LevelDef[]): void {
-  try {
-    localStorage.setItem(CUSTOM_LEVELS_KEY, JSON.stringify(levels));
-  } catch {}
+  dataStore.updateCustomLevels(() => levels);
 }
 
 export function getNextCustomId(): number {
