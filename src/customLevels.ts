@@ -1,4 +1,13 @@
-import { LevelDef, StarDef, ObstacleDef, StarRules, CANVAS_W, CANVAS_H } from "./levels";
+import {
+  LevelDef,
+  StarDef,
+  ObstacleDef,
+  StarRules,
+  CANVAS_W,
+  CANVAS_H,
+  normalizeLevel,
+  validateObstacleFields,
+} from "./levels";
 
 const CUSTOM_LEVELS_KEY = "hxywl-61904-custom-levels";
 const CUSTOM_LEVEL_ID_START = 1000;
@@ -38,14 +47,10 @@ function validateStarDef(s: unknown, idx: number): string | null {
 }
 
 function validateObstacleDef(ob: unknown, idx: number): string | null {
-  if (!ob || typeof ob !== "object") return `障碍 #${idx + 1} 格式错误`;
-  const o = ob as Record<string, unknown>;
-  if (!isNumber(o.x) || !isNumber(o.y) || !isNumber(o.w) || !isNumber(o.h))
-    return `障碍 #${idx + 1} 坐标或尺寸无效`;
-  if ((o.w as number) < 10 || (o.h as number) < 10)
-    return `障碍 #${idx + 1} 尺寸过小`;
-  if (o.type !== undefined && o.type !== "wall" && o.type !== "oneTime" && o.type !== "slowZone")
-    return `障碍 #${idx + 1} 类型无效`;
+  const fieldResult = validateObstacleFields(ob, idx);
+  if (!fieldResult.valid) {
+    return fieldResult.error || null;
+  }
   return null;
 }
 
@@ -164,7 +169,9 @@ export function importLevel(fileContent: string): ImportResult {
   const level = levelData as LevelDef;
   const existingLevels = loadCustomLevels();
 
-  let finalName = level.name.trim();
+  const normalizedLevel = normalizeLevel(level);
+
+  let finalName = normalizedLevel.name.trim();
   const nameExists = (name: string) =>
     existingLevels.some((l) => l.name.trim() === name);
   if (nameExists(finalName)) {
@@ -177,7 +184,7 @@ export function importLevel(fileContent: string): ImportResult {
 
   const newId = getNextCustomId();
   const importedLevel: LevelDef = {
-    ...level,
+    ...normalizedLevel,
     id: newId,
     name: finalName,
   };
@@ -194,7 +201,7 @@ export function loadCustomLevels(): LevelDef[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        return parsed;
+        return parsed.map((l) => normalizeLevel(l as LevelDef));
       }
     }
   } catch {}
@@ -215,15 +222,16 @@ export function getNextCustomId(): number {
 }
 
 export function saveCustomLevel(level: LevelDef): LevelDef {
+  const normalized = normalizeLevel(level);
   const levels = loadCustomLevels();
   const existingIndex = levels.findIndex((l) => l.id === level.id);
   if (existingIndex >= 0) {
-    levels[existingIndex] = level;
+    levels[existingIndex] = normalized;
   } else {
-    levels.push(level);
+    levels.push(normalized);
   }
   saveCustomLevels(levels);
-  return level;
+  return normalized;
 }
 
 export function deleteCustomLevel(levelId: number): void {

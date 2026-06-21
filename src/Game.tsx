@@ -486,9 +486,9 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
           ctx.lineWidth = 1;
           ctx.setLineDash([4, 4]);
           if (ob.type === "movingHorizontal") {
-            ctx.strokeRect(ob.baseX - range, ob.y, ob.w + range * 2, ob.h);
+            ctx.strokeRect(ob.baseX, ob.y, ob.w + range, ob.h);
           } else {
-            ctx.strokeRect(ob.x, ob.baseY - range, ob.w, ob.h + range * 2);
+            ctx.strokeRect(ob.x, ob.baseY, ob.w, ob.h + range);
           }
           ctx.setLineDash([]);
           ctx.restore();

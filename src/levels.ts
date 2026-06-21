@@ -478,6 +478,87 @@ export interface ValidationResult {
   issues: ValidationIssue[];
 }
 
+export function normalizeObstacleDef(ob: ObstacleDef): ObstacleDef {
+  const result: ObstacleDef = {
+    x: ob.x,
+    y: ob.y,
+    w: Math.max(10, ob.w),
+    h: Math.max(10, ob.h),
+    type: ob.type || "wall",
+  };
+
+  if (result.type === "movingHorizontal" || result.type === "movingVertical") {
+    let moveRange = 0;
+    if (typeof ob.moveRange === "number" && !isNaN(ob.moveRange)) {
+      moveRange = Math.max(0, Math.min(300, ob.moveRange));
+    }
+    let moveSpeed = 1.5;
+    if (typeof ob.moveSpeed === "number" && !isNaN(ob.moveSpeed)) {
+      moveSpeed = Math.max(0.1, Math.min(5, ob.moveSpeed));
+    }
+    result.moveRange = moveRange;
+    result.moveSpeed = parseFloat(moveSpeed.toFixed(2));
+  }
+
+  return result;
+}
+
+export function normalizeLevel(level: LevelDef): LevelDef {
+  return {
+    ...level,
+    obstacles: level.obstacles.map(normalizeObstacleDef),
+  };
+}
+
+export interface FieldValidationResult {
+  valid: boolean;
+  error?: string;
+}
+
+export function validateObstacleFields(ob: unknown, idx: number): FieldValidationResult {
+  if (!ob || typeof ob !== "object") {
+    return { valid: false, error: `障碍 #${idx + 1} 格式错误` };
+  }
+  const o = ob as Record<string, unknown>;
+
+  if (typeof o.x !== "number" || isNaN(o.x) ||
+      typeof o.y !== "number" || isNaN(o.y) ||
+      typeof o.w !== "number" || isNaN(o.w) ||
+      typeof o.h !== "number" || isNaN(o.h)) {
+    return { valid: false, error: `障碍 #${idx + 1} 坐标或尺寸无效` };
+  }
+
+  if (o.w < 10 || o.h < 10) {
+    return { valid: false, error: `障碍 #${idx + 1} 尺寸过小（最小 10×10）` };
+  }
+
+  const validTypes = ["wall", "oneTime", "slowZone", "movingHorizontal", "movingVertical"];
+  if (o.type !== undefined && !validTypes.includes(o.type as string)) {
+    return { valid: false, error: `障碍 #${idx + 1} 类型无效` };
+  }
+
+  if (o.type === "movingHorizontal" || o.type === "movingVertical") {
+    if (o.moveRange !== undefined) {
+      if (typeof o.moveRange !== "number" || isNaN(o.moveRange)) {
+        return { valid: false, error: `障碍 #${idx + 1} moveRange 必须是数字` };
+      }
+      if (o.moveRange < 0 || o.moveRange > 300) {
+        return { valid: false, error: `障碍 #${idx + 1} moveRange 需在 0-300 之间` };
+      }
+    }
+    if (o.moveSpeed !== undefined) {
+      if (typeof o.moveSpeed !== "number" || isNaN(o.moveSpeed)) {
+        return { valid: false, error: `障碍 #${idx + 1} moveSpeed 必须是数字` };
+      }
+      if (o.moveSpeed < 0.1 || o.moveSpeed > 5) {
+        return { valid: false, error: `障碍 #${idx + 1} moveSpeed 需在 0.1-5 之间` };
+      }
+    }
+  }
+
+  return { valid: true };
+}
+
 export function validateLevel(
   level: LevelDef,
   ballRadius: number,
@@ -534,10 +615,8 @@ export function validateLevel(
     let maxY = ob.y + ob.h;
     const range = ob.moveRange || 0;
     if (ob.type === "movingHorizontal") {
-      minX = ob.x - range;
       maxX = ob.x + ob.w + range;
     } else if (ob.type === "movingVertical") {
-      minY = ob.y - range;
       maxY = ob.y + ob.h + range;
     }
     if (

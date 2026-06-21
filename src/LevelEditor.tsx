@@ -8,6 +8,7 @@ import {
   validateLevel,
   ValidationIssue,
   ValidationResult,
+  normalizeLevel,
 } from "./levels";
 import { useGameViewport, screenToWorld, ViewportInfo } from "./useGameViewport";
 import { DEFAULT_CONFIG, PhysicsConfig } from "./physics";
@@ -36,7 +37,7 @@ interface EditorProps {
 const config: PhysicsConfig = DEFAULT_CONFIG;
 
 export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew }: EditorProps) {
-  const [level, setLevel] = useState<LevelDef>(initialLevel);
+  const [level, setLevel] = useState<LevelDef>(normalizeLevel(initialLevel));
   const [tool, setTool] = useState<Tool>("select");
   const [selected, setSelected] = useState<SelectedItem>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -191,9 +192,9 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
           ctx.lineWidth = 1;
           ctx.setLineDash([4, 4]);
           if (ob.type === "movingHorizontal") {
-            ctx.strokeRect(ob.x - range, ob.y, ob.w + range * 2, ob.h);
+            ctx.strokeRect(ob.x, ob.y, ob.w + range, ob.h);
           } else {
-            ctx.strokeRect(ob.x, ob.y - range, ob.w, ob.h + range * 2);
+            ctx.strokeRect(ob.x, ob.y, ob.w, ob.h + range);
           }
           ctx.setLineDash([]);
           ctx.restore();
@@ -682,10 +683,10 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
       return;
     }
 
-    const levelToSave = updateStarRulesForLevel({
+    const levelToSave = normalizeLevel(updateStarRulesForLevel({
       ...level,
       name: trimmedName || "自定义关卡",
-    });
+    }));
     const saved = saveCustomLevel(levelToSave);
     setLevel(saved);
     setDirty(false);
@@ -700,10 +701,10 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
       return;
     }
     const trimmedName = levelName.trim();
-    const levelToPlay = updateStarRulesForLevel({
+    const levelToPlay = normalizeLevel(updateStarRulesForLevel({
       ...level,
       name: trimmedName || "自定义关卡",
-    });
+    }));
     setPlayLevel(JSON.parse(JSON.stringify(levelToPlay)));
     setIsPlaying(true);
   }, [level, levelName, validationResult]);
@@ -711,10 +712,10 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
   const handleConfirmPlay = useCallback(() => {
     setShowPlayWarning(false);
     const trimmedName = levelName.trim();
-    const levelToPlay = updateStarRulesForLevel({
+    const levelToPlay = normalizeLevel(updateStarRulesForLevel({
       ...level,
       name: trimmedName || "自定义关卡",
-    });
+    }));
     setPlayLevel(JSON.parse(JSON.stringify(levelToPlay)));
     setIsPlaying(true);
   }, [level, levelName]);
