@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import "./styles.css";
 import { levels, LevelDef } from "./levels";
 import { Progress, loadProgress, updateLevelResult } from "./progress";
@@ -10,6 +10,9 @@ import {
   getNextCustomId,
   createEmptyLevel,
   deleteCustomLevel,
+  exportLevel,
+  importLevel,
+  ImportResult,
 } from "./customLevels";
 
 const GAME_ID = "hxywl-61904";
@@ -23,6 +26,8 @@ function App() {
   const [progress, setProgress] = useState<Progress>(loadProgress);
   const [view, setView] = useState<View>({ kind: "select" });
   const [customLevels, setCustomLevels] = useState<LevelDef[]>(loadCustomLevels);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const allLevels = [...levels, ...customLevels];
 
@@ -75,6 +80,35 @@ function App() {
     refreshCustomLevels();
   }, [refreshCustomLevels]);
 
+  const handleExportLevel = useCallback((level: LevelDef) => {
+    exportLevel(level);
+  }, []);
+
+  const handleImportLevel = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const content = evt.target?.result;
+      if (typeof content === "string") {
+        const result = importLevel(content);
+        setImportResult(result);
+        if (result.success) {
+          refreshCustomLevels();
+        }
+      }
+    };
+    reader.onerror = () => {
+      setImportResult({ success: false, error: "文件读取失败" });
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }, [refreshCustomLevels]);
+
   const currentLevel = allLevels.find(
     (l) => l.id === (view.kind === "play" ? view.levelId : 0)
   );
@@ -101,6 +135,8 @@ function App() {
           onCreateLevel={handleCreateLevel}
           onEditLevel={handleEditLevel}
           onDeleteLevel={handleDeleteLevel}
+          onExportLevel={handleExportLevel}
+          onImportLevel={handleImportLevel}
           customLevels={customLevels}
         />
       )}
@@ -124,6 +160,33 @@ function App() {
           onSave={handleSaveLevel}
           isNew={view.isNew}
         />
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        style={{ display: "none" }}
+        onChange={handleFileSelected}
+      />
+
+      {importResult && (
+        <div className="import-result-overlay" onClick={() => setImportResult(null)}>
+          <div className="import-result-card" onClick={(e) => e.stopPropagation()}>
+            <h3>{importResult.success ? "✅ 导入成功" : "❌ 导入失败"}</h3>
+            {importResult.success && importResult.level && (
+              <p>关卡「{importResult.level.name}」已添加到自定义关卡列表</p>
+            )}
+            {!importResult.success && importResult.error && (
+              <p className="import-error-text">{importResult.error}</p>
+            )}
+            <button
+              className="btn-import-result-ok"
+              onClick={() => setImportResult(null)}
+            >
+              确定
+            </button>
+          </div>
+        </div>
       )}
     </main>
   );

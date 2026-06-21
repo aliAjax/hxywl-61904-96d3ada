@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { levels, LevelDef } from "./levels";
 import { Progress, isUnlocked, getStars } from "./progress";
 import Tutorial, { TutorialStep } from "./Tutorial";
+import { exportLevel, importLevel } from "./customLevels";
 
 type FilterType = "all" | "notCleared" | "cleared" | "notFullStars" | "custom";
 type SortType = "id" | "stars";
@@ -16,6 +17,8 @@ interface Props {
   onCreateLevel: () => void;
   onEditLevel: (levelId: number) => void;
   onDeleteLevel: (levelId: number) => void;
+  onExportLevel: (level: LevelDef) => void;
+  onImportLevel: () => void;
   customLevels: LevelDef[];
 }
 
@@ -31,7 +34,7 @@ function StarRow(count: number, size: "sm" | "md" = "md") {
   );
 }
 
-export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditLevel, onDeleteLevel, customLevels }: Props) {
+export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditLevel, onDeleteLevel, onExportLevel, onImportLevel, customLevels }: Props) {
   const totalLevels = levels.length + customLevels.length;
   const [showTutorial, setShowTutorial] = useState(false);
   const [hoveredLevel, setHoveredLevel] = useState<LevelDef | null>(null);
@@ -149,6 +152,9 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
           <button className="btn-create-level" onClick={onCreateLevel}>
             ➕ 新建关卡
           </button>
+          <button className="btn-import-level" onClick={onImportLevel}>
+            📥 导入关卡
+          </button>
         </div>
         <div className="progress-summary">
           <div className="progress-item">
@@ -263,6 +269,12 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
                         onClick={() => onEditLevel(lv.id)}
                       >
                         ✏ 编辑
+                      </button>
+                      <button
+                        className="btn-export-small"
+                        onClick={() => onExportLevel(lv)}
+                      >
+                        📤
                       </button>
                       <button
                         className="btn-delete-small"
