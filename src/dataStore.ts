@@ -33,7 +33,8 @@ export type RecoveryAction =
   | { type: "none" }
   | { type: "migration"; source: "old-keys" }
   | { type: "recovery"; source: "backup" }
-  | { type: "fallback" }
+  | { type: "firstVisit" }
+  | { type: "fallback"; reason: "corrupted" | "storageUnavailable" }
   | { type: "corrupted"; details: string };
 
 export interface LoadResult {
@@ -76,6 +77,50 @@ function createDefaultData(): GameData {
     customLevels: defaultCustomLevels(),
     tutorialCompleted: false,
   };
+}
+
+let _storageAvailable: boolean | null = null;
+
+function isStorageAvailable(): boolean {
+  if (_storageAvailable !== null) return _storageAvailable;
+  try {
+    const testKey = "__hxywl_storage_test__";
+    localStorage.setItem(testKey, "1");
+    localStorage.removeItem(testKey);
+    _storageAvailable = true;
+    return true;
+  } catch {
+    _storageAvailable = false;
+    return false;
+  }
+}
+
+function storageGet(key: string): string | null {
+  if (!isStorageAvailable()) return null;
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(key: string, value: string): boolean {
+  if (!isStorageAvailable()) return false;
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    _storageAvailable = false;
+    return false;
+  }
+}
+
+function storageRemove(key: string): void {
+  if (!isStorageAvailable()) return;
+  try {
+    localStorage.removeItem(key);
+  } catch {
+  }
 }
 
 function safeJsonParse(raw: string | null): unknown | null {
@@ -192,7 +237,7 @@ function normalizeGameData(data: GameData): GameData {
 }
 
 function tryLoadFromKey(key: string): GameData | null {
-  const raw = localStorage.getItem(key);
+  const raw = storageGet(key);
   const parsed = safeJsonParse(raw);
   if (validateGameData(parsed)) {
     return normalizeGameData(parsed);
@@ -201,7 +246,7 @@ function tryLoadFromKey(key: string): GameData | null {
 }
 
 function tryLoadOldProgress(): Progress | null {
-  const raw = localStorage.getItem(OLD_PROGRESS_KEY);
+  const raw = storageGet(OLD_PROGRESS_KEY);
   const parsed = safeJsonParse(raw);
   if (isValidProgress(parsed)) {
     return normalizeProgress(parsed);
@@ -210,7 +255,7 @@ function tryLoadOldProgress(): Progress | null {
 }
 
 function tryLoadOldCustomLevels(): LevelDef[] | null {
-  const raw = localStorage.getItem(OLD_CUSTOM_LEVELS_KEY);
+  const raw = storageGet(OLD_CUSTOM_LEVELS_KEY);
   const parsed = safeJsonParse(raw);
   if (Array.isArray(parsed)) {
     const validLevels: LevelDef[] = [];
@@ -227,7 +272,7 @@ function tryLoadOldCustomLevels(): LevelDef[] | null {
 }
 
 function tryLoadOldTutorial(): boolean | null {
-  const raw = localStorage.getItem(OLD_TUTORIAL_KEY);
+  const raw = storageGet(OLD_TUTORIAL_KEY);
   if (raw === "true") return true;
   if (raw === "false") return false;
   return null;
@@ -254,25 +299,27 @@ function migrateFromOldKeys(): GameData | null {
   };
 }
 
-function saveBackup(data: GameData): void {
-  try {
-    localStorage.setItem(BACKUP_STORAGE_KEY, JSON.stringify(data));
-  } catch {
-  }
+function anyKeyExistsInStorage(): boolean {
+  return (
+    storageGet(MAIN_STORAGE_KEY) !== null ||
+    storageGet(BACKUP_STORAGE_KEY) !== null ||
+    storageGet(OLD_PROGRESS_KEY) !== null ||
+    storageGet(OLD_CUSTOM_LEVELS_KEY) !== null ||
+    storageGet(OLD_TUTORIAL_KEY) !== null
+  );
 }
 
 function deleteOldKeys(): void {
-  try {
-    localStorage.removeItem(OLD_PROGRESS_KEY);
-    localStorage.removeItem(OLD_CUSTOM_LEVELS_KEY);
-    localStorage.removeItem(OLD_TUTORIAL_KEY);
-  } catch {
-  }
+  storageRemove(OLD_PROGRESS_KEY);
+  storageRemove(OLD_CUSTOM_LEVELS_KEY);
+  storageRemove(OLD_TUTORIAL_KEY);
 }
 
 class DataStore {
   private listeners: Set<EventListener> = new Set();
   private currentData: GameData | null = null;
+  private lastRecovery: RecoveryAction = { type: "none" };
+  private loaded = false;
 
   addListener(listener: EventListener): () => void {
     this.listeners.add(listener);
@@ -289,46 +336,69 @@ class DataStore {
   }
 
   load(): LoadResult {
+    if (this.loaded && this.currentData) {
+      return { data: this.currentData, recovery: this.lastRecovery };
+    }
+
     let data: GameData | null = null;
     let recovery: RecoveryAction = { type: "none" };
 
     data = tryLoadFromKey(MAIN_STORAGE_KEY);
     if (data) {
-      this.currentData = data;
-      this.emit({ type: "dataLoaded", data, recovery, timestamp: Date.now() });
+      recovery = { type: "none" };
+      this.commit(data, recovery);
       return { data, recovery };
     }
 
     data = tryLoadFromKey(BACKUP_STORAGE_KEY);
     if (data) {
       recovery = { type: "recovery", source: "backup" };
-      this.saveInternal(data);
-      this.currentData = data;
+      this.trySave(data);
+      this.commit(data, recovery);
       this.emit({ type: "recoveryPerformed", data, recovery, timestamp: Date.now() });
-      this.emit({ type: "dataLoaded", data, recovery, timestamp: Date.now() });
       return { data, recovery };
     }
 
     data = migrateFromOldKeys();
     if (data) {
       recovery = { type: "migration", source: "old-keys" };
-      this.saveInternal(data);
+      this.trySave(data);
       deleteOldKeys();
-      this.currentData = data;
+      this.commit(data, recovery);
       this.emit({ type: "migrationPerformed", data, recovery, timestamp: Date.now() });
-      this.emit({ type: "dataLoaded", data, recovery, timestamp: Date.now() });
+      return { data, recovery };
+    }
+
+    if (!isStorageAvailable()) {
+      data = createDefaultData();
+      recovery = { type: "fallback", reason: "storageUnavailable" };
+      this.commit(data, recovery);
+      return { data, recovery };
+    }
+
+    if (!anyKeyExistsInStorage()) {
+      data = createDefaultData();
+      recovery = { type: "firstVisit" };
+      this.trySave(data);
+      this.commit(data, recovery);
       return { data, recovery };
     }
 
     data = createDefaultData();
-    recovery = { type: "fallback" };
-    this.saveInternal(data);
-    this.currentData = data;
-    this.emit({ type: "dataLoaded", data, recovery, timestamp: Date.now() });
+    recovery = { type: "fallback", reason: "corrupted" };
+    this.trySave(data);
+    this.commit(data, recovery);
     return { data, recovery };
   }
 
-  private saveInternal(data: GameData): void {
+  private commit(data: GameData, recovery: RecoveryAction): void {
+    this.currentData = data;
+    this.lastRecovery = recovery;
+    this.loaded = true;
+    this.emit({ type: "dataLoaded", data, recovery, timestamp: Date.now() });
+  }
+
+  private trySave(data: GameData): boolean {
     const updated: GameData = {
       ...data,
       version: DATA_STORE_VERSION,
@@ -339,18 +409,19 @@ class DataStore {
     };
 
     const normalized = normalizeGameData(updated);
+    const json = JSON.stringify(normalized);
 
-    try {
-      localStorage.setItem(MAIN_STORAGE_KEY, JSON.stringify(normalized));
-      saveBackup(normalized);
-      this.currentData = normalized;
-    } catch (e) {
-      throw new Error("数据保存失败：" + (e instanceof Error ? e.message : "未知错误"));
+    const mainOk = storageSet(MAIN_STORAGE_KEY, json);
+    if (mainOk) {
+      storageSet(BACKUP_STORAGE_KEY, json);
     }
+
+    this.currentData = normalized;
+    return mainOk;
   }
 
   save(data: GameData): GameData {
-    this.saveInternal(data);
+    this.trySave(data);
     this.emit({ type: "dataSaved", data: this.currentData!, timestamp: Date.now() });
     return this.currentData!;
   }
@@ -365,7 +436,8 @@ class DataStore {
 
   reset(): GameData {
     const data = createDefaultData();
-    this.saveInternal(data);
+    this.trySave(data);
+    this.lastRecovery = { type: "firstVisit" };
     this.emit({ type: "dataReset", data, timestamp: Date.now() });
     return data;
   }
@@ -402,18 +474,29 @@ class DataStore {
   getRecoveryMessage(recovery: RecoveryAction): string {
     switch (recovery.type) {
       case "none":
+      case "firstVisit":
         return "";
       case "migration":
         return "已将您的游戏数据从旧版本迁移到新版本。您的通关记录、自定义关卡和教程进度已全部保留。";
       case "recovery":
         return "检测到数据异常，已从最近的备份中恢复了您的游戏数据。";
       case "fallback":
-        return "无法加载游戏数据，已恢复到初始状态。这不会影响游戏功能。";
+        if (recovery.reason === "storageUnavailable") {
+          return "浏览器本地存储不可用，游戏进度将无法保存。请检查浏览器设置或尝试关闭隐私模式。";
+        }
+        return "存储的数据已损坏，已恢复到初始状态。这不会影响游戏功能。";
       case "corrupted":
         return `数据错误：${recovery.details}。已使用默认数据继续游戏。`;
       default:
         return "";
     }
+  }
+
+  forceReload(): LoadResult {
+    this.loaded = false;
+    this.currentData = null;
+    this.lastRecovery = { type: "none" };
+    return this.load();
   }
 }
 

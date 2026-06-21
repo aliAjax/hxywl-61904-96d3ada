@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   dataStore,
   GameData,
@@ -19,31 +19,34 @@ export interface UseDataStoreResult {
   isReady: boolean;
 }
 
+function needsNotice(recovery: RecoveryAction): boolean {
+  return recovery.type !== "none" && recovery.type !== "firstVisit";
+}
+
 export function useDataStore(): UseDataStoreResult {
   const [loadResult, setLoadResult] = useState<LoadResult | null>(null);
   const [showRecoveryNotice, setShowRecoveryNotice] = useState(false);
   const [isReady, setIsReady] = useState(false);
 
-  const loadData = useCallback(() => {
-    try {
-      const result = dataStore.load();
-      setLoadResult(result);
-      if (result.recovery.type !== "none") {
-        setShowRecoveryNotice(true);
-      }
-      setIsReady(true);
-      return result;
-    } catch {
-      const fallbackData = dataStore.reset();
-      const recovery: RecoveryAction = { type: "fallback" };
-      setLoadResult({ data: fallbackData, recovery });
+  const mountedRef = useRef(false);
+  const dismissedRef = useRef(false);
+
+  const loadData = useCallback((): LoadResult => {
+    const result = dataStore.load();
+
+    setLoadResult(result);
+    setIsReady(true);
+
+    if (needsNotice(result.recovery) && !dismissedRef.current) {
       setShowRecoveryNotice(true);
-      setIsReady(true);
-      return { data: fallbackData, recovery };
     }
+
+    return result;
   }, []);
 
   useEffect(() => {
+    if (mountedRef.current) return;
+    mountedRef.current = true;
     loadData();
 
     const handleStoreEvent = (event: DataStoreEvent) => {
@@ -54,7 +57,10 @@ export function useDataStore(): UseDataStoreResult {
             : null
         );
       }
-      if (event.type === "recoveryPerformed" || event.type === "migrationPerformed") {
+      if (
+        (event.type === "recoveryPerformed" || event.type === "migrationPerformed") &&
+        !dismissedRef.current
+      ) {
         setShowRecoveryNotice(true);
       }
     };
@@ -64,6 +70,7 @@ export function useDataStore(): UseDataStoreResult {
 
   const dismissRecoveryNotice = useCallback(() => {
     setShowRecoveryNotice(false);
+    dismissedRef.current = true;
   }, []);
 
   const resetAllData = useCallback(() => {
@@ -72,13 +79,20 @@ export function useDataStore(): UseDataStoreResult {
     );
     if (confirmed) {
       dataStore.reset();
-      loadData();
+      dismissedRef.current = false;
+      const result = dataStore.forceReload();
+      setLoadResult(result);
+      setShowRecoveryNotice(false);
     }
-  }, [loadData]);
+  }, []);
 
   const refreshData = useCallback(() => {
-    loadData();
-  }, [loadData]);
+    const result = dataStore.forceReload();
+    setLoadResult(result);
+    if (needsNotice(result.recovery) && !dismissedRef.current) {
+      setShowRecoveryNotice(true);
+    }
+  }, []);
 
   const data = loadResult?.data ?? {
     version: 2,
@@ -88,7 +102,7 @@ export function useDataStore(): UseDataStoreResult {
     tutorialCompleted: false,
   };
 
-  const recovery = loadResult?.recovery ?? { type: "none" };
+  const recovery = loadResult?.recovery ?? { type: "firstVisit" as const };
   const recoveryMessage = dataStore.getRecoveryMessage(recovery);
 
   return {

@@ -13,6 +13,7 @@ function getRecoveryIcon(recovery: RecoveryAction): string {
     case "recovery":
       return "🔄";
     case "fallback":
+      if (recovery.reason === "storageUnavailable") return "🔒";
       return "⚠️";
     case "corrupted":
       return "❌";
@@ -28,6 +29,7 @@ function getRecoveryTitle(recovery: RecoveryAction): string {
     case "recovery":
       return "数据已恢复";
     case "fallback":
+      if (recovery.reason === "storageUnavailable") return "存储不可用";
       return "数据已重置";
     case "corrupted":
       return "数据损坏";
@@ -42,6 +44,7 @@ function getRecoveryType(recovery: RecoveryAction): "info" | "warning" | "error"
     case "recovery":
       return "info";
     case "fallback":
+      if (recovery.reason === "storageUnavailable") return "warning";
       return "warning";
     case "corrupted":
       return "error";
@@ -55,7 +58,7 @@ export default function DataRecoveryNotice({
   message,
   onDismiss,
 }: DataRecoveryNoticeProps) {
-  if (recovery.type === "none" || !message) {
+  if (recovery.type === "none" || recovery.type === "firstVisit" || !message) {
     return null;
   }
 
