@@ -959,7 +959,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
               <button className="btn-retry" onClick={handleRetry}>
                 🔄 重新挑战
               </button>
-              {stateRef.current.cleared && hasNextLevel && (
+              {hasNextLevel && (
                 <button className="btn-next" onClick={onNext}>
                   下一关 →
                 </button>
