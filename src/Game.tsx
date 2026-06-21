@@ -59,6 +59,16 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
   const [bestRoute, setBestRoute] = useState<BestRoute | null>(null);
   const [showReplay, setShowReplay] = useState(false);
   const [savedThisRun, setSavedThisRun] = useState(false);
+  const [resultCleared, setResultCleared] = useState(false);
+
+  const levelRef = useRef(level);
+  levelRef.current = level;
+  const prevBestStarsRef = useRef(prevBestStars);
+  prevBestStarsRef.current = prevBestStars;
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const savedThisRunRef = useRef(savedThisRun);
+  savedThisRunRef.current = savedThisRun;
 
   const replayTrajectories: ReplayShotTrajectory[] = useMemo(() => {
     if (!bestRoute || !showReplay) return [];
@@ -83,49 +93,53 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       const engine = engineRef.current;
       if (!engine) return;
 
+      const currentLevel = levelRef.current;
       const s = engine.getState();
       const remaining = s.shotsRemaining;
       const used = s.shotsUsed;
       setRemainingShots(remaining);
       setShotsUsed(used);
       if (!cleared) {
-        const dx = s.ball.x - level.goal.x;
-        const dy = s.ball.y - level.goal.y;
+        const dx = s.ball.x - currentLevel.goal.x;
+        const dy = s.ball.y - currentLevel.goal.y;
         setDistanceToGoal(Math.round(Math.sqrt(dx * dx + dy * dy)));
       }
       const earnedStars = calculateEarnedStars(
-        level,
+        currentLevel,
         s.collected,
         s.shotsUsed,
         remaining,
         cleared
       );
 
-      if (cleared && !savedThisRun) {
+      setResultCleared(cleared);
+
+      if (cleared && !savedThisRunRef.current) {
         const finalShots = engine.getShotRecords();
-        const isBetter = saveBestRoute(level.id, finalShots, earnedStars, used);
+        const isBetter = saveBestRoute(currentLevel.id, finalShots, earnedStars, used);
         if (isBetter) {
           setBestRoute({
-            levelId: level.id,
+            levelId: currentLevel.id,
             shots: [...finalShots],
             stars: earnedStars,
             shotsUsed: used,
             timestamp: Date.now(),
           });
         }
+        savedThisRunRef.current = true;
         setSavedThisRun(true);
       }
 
       setResultStars(earnedStars);
-      setIsNewRecord(earnedStars > prevBestStars);
+      setIsNewRecord(earnedStars > prevBestStarsRef.current);
       setShowResult(true);
-      onComplete(level.id, earnedStars, cleared);
+      onCompleteRef.current(currentLevel.id, earnedStars, cleared);
     },
-    [level, onComplete, prevBestStars, savedThisRun]
+    []
   );
 
   const initEngine = useCallback(() => {
-    const engine = new GameEngine(level, {
+    const engine = new GameEngine(levelRef.current, {
       onPhaseChange: (p) => setPhase(p),
       onShotsChange: (remaining) => setShots(remaining),
       onCollectedChange: (c) => setCollected(c),
@@ -135,7 +149,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     });
     engineRef.current = engine;
     engine.start();
-  }, [level, finishLevel]);
+  }, [finishLevel]);
 
   const handleRetry = useCallback(() => {
     const engine = engineRef.current;
@@ -151,10 +165,12 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     setShotsUsed(0);
     setDistanceToGoal(0);
     setIsNewRecord(false);
+    setResultCleared(false);
     setShowResult(false);
     setPhase("aim");
     setIsPaused(false);
     setShotRecords([]);
+    savedThisRunRef.current = false;
     setSavedThisRun(false);
   }, [level]);
 
@@ -414,7 +430,7 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       {showResult && (
         <div className="result-overlay">
           <div className="result-card">
-            {engineRef.current?.isCleared() ? (
+            {resultCleared ? (
               <>
                 <h3 className="result-title success">🎉 通关成功</h3>
                 {isNewRecord && (
