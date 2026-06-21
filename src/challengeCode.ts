@@ -16,6 +16,11 @@ const PREFIX_GZ = "HX1Z-";
 
 const CODE_VERSION = 1;
 
+const MAX_CODE_PAYLOAD_LENGTH = 8192;
+const MAX_DECOMPRESSED_BYTES = 32768;
+const MAX_STAR_COUNT = 20;
+const MAX_OBSTACLE_COUNT = 50;
+
 const OBSTACLE_TYPE_TO_CODE: Record<string, number> = {
   wall: 0,
   oneTime: 1,
@@ -341,6 +346,8 @@ function validateCompactLevel(data: unknown): string | null {
     return "终点坐标无效";
 
   if (!Array.isArray(d.s)) return "星星数据必须是数组";
+  if ((d.s as unknown[]).length > MAX_STAR_COUNT)
+    return `星星数量不能超过 ${MAX_STAR_COUNT} 个（当前 ${(d.s as unknown[]).length} 个）`;
   for (let i = 0; i < (d.s as unknown[]).length; i++) {
     const s = (d.s as unknown[])[i];
     if (!Array.isArray(s) || s.length < 2 || !isNumber(s[0]) || !isNumber(s[1]))
@@ -348,6 +355,8 @@ function validateCompactLevel(data: unknown): string | null {
   }
 
   if (!Array.isArray(d.o)) return "障碍数据必须是数组";
+  if ((d.o as unknown[]).length > MAX_OBSTACLE_COUNT)
+    return `障碍数量不能超过 ${MAX_OBSTACLE_COUNT} 个（当前 ${(d.o as unknown[]).length} 个）`;
   for (let i = 0; i < (d.o as unknown[]).length; i++) {
     const o = (d.o as unknown[])[i];
     if (!Array.isArray(o) || o.length < 4)
@@ -438,9 +447,25 @@ export async function decodeChallengeCode(code: string): Promise<ChallengeCodeRe
     return { success: false, error: "挑战码内容为空", warnings };
   }
 
+  if (payload.length > MAX_CODE_PAYLOAD_LENGTH) {
+    return {
+      success: false,
+      error: `挑战码过长（${payload.length} 字符，上限 ${MAX_CODE_PAYLOAD_LENGTH}），数据可能异常`,
+      warnings,
+    };
+  }
+
   const bytes = base64urlDecode(payload);
   if (!bytes) {
     return { success: false, error: "挑战码编码无效，无法解码", warnings };
+  }
+
+  if (bytes.length > MAX_CODE_PAYLOAD_LENGTH) {
+    return {
+      success: false,
+      error: `挑战码原始数据过大（${bytes.length} 字节），数据可能异常`,
+      warnings,
+    };
   }
 
   let jsonBytes: Uint8Array;
@@ -452,6 +477,14 @@ export async function decodeChallengeCode(code: string): Promise<ChallengeCodeRe
     }
   } else {
     jsonBytes = bytes;
+  }
+
+  if (jsonBytes.length > MAX_DECOMPRESSED_BYTES) {
+    return {
+      success: false,
+      error: `挑战码解压后数据过大（${jsonBytes.length} 字节，上限 ${MAX_DECOMPRESSED_BYTES}），数据可能异常`,
+      warnings,
+    };
   }
 
   let parsed: unknown;
