@@ -2,7 +2,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 61904",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0 --port 61904"
+    "preview": "vite preview --host 0.0.0.0 --port 61904",
+    "test": "tsx tests/index.test.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
@@ -13,6 +14,7 @@
   },
   "devDependencies": {
     "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3"
+    "@types/react-dom": "^19.2.3",
+    "tsx": "^4.22.4"
   }
 }
