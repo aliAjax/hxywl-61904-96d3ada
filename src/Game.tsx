@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { LevelDef, CANVAS_W, CANVAS_H, levels, calculateEarnedStars, checkStarRuleAchieved } from "./levels";
 import { Progress, getStars, isTutorialCompleted, setTutorialCompleted } from "./progress";
 import Tutorial, { TutorialStep } from "./Tutorial";
@@ -18,6 +18,15 @@ import {
   applyLaunch,
   predictTrajectory,
 } from "./physics";
+import {
+  ShotRecord,
+  BestRoute,
+  ReplayShotTrajectory,
+  getBestRoute,
+  saveBestRoute,
+  simulateRoute,
+  isCustomLevel,
+} from "./replayRoutes";
 
 interface Props {
   level: LevelDef;
@@ -55,6 +64,16 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(false);
 
+  const [shotRecords, setShotRecords] = useState<ShotRecord[]>([]);
+  const shotRecordsRef = useRef<ShotRecord[]>([]);
+  const lastBallPosRef = useRef<{ x: number; y: number }>({
+    x: level.ball.x,
+    y: level.ball.y,
+  });
+  const [bestRoute, setBestRoute] = useState<BestRoute | null>(null);
+  const [showReplay, setShowReplay] = useState(false);
+  const [savedThisRun, setSavedThisRun] = useState(false);
+
   const finishLevel = useCallback(
     (cleared: boolean) => {
       const s = stateRef.current;
@@ -76,17 +95,38 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         remaining,
         cleared
       );
+
+      if (cleared && !savedThisRun) {
+        const finalShots = shotRecordsRef.current;
+        const isBetter = saveBestRoute(level.id, finalShots, earnedStars, used);
+        if (isBetter) {
+          setBestRoute({
+            levelId: level.id,
+            shots: [...finalShots],
+            stars: earnedStars,
+            shotsUsed: used,
+            timestamp: Date.now(),
+          });
+        }
+        setSavedThisRun(true);
+      }
+
       setResultStars(earnedStars);
       setIsNewRecord(earnedStars > prevBestStars);
       setShowResult(true);
       onComplete(level.id, earnedStars, cleared);
     },
-    [level, onComplete, prevBestStars]
+    [level, onComplete, prevBestStars, savedThisRun]
   );
 
   useEffect(() => {
     stateRef.current = createPhysicsState(level, config);
     lastTimeRef.current = 0;
+    shotRecordsRef.current = [];
+    setShotRecords([]);
+    lastBallPosRef.current = { x: level.ball.x, y: level.ball.y };
+    setSavedThisRun(false);
+    setBestRoute(getBestRoute(level.id));
   }, [level.id]);
 
   useEffect(() => {
@@ -115,6 +155,10 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     setShowResult(false);
     setPhase("aim");
     setIsPaused(false);
+    shotRecordsRef.current = [];
+    setShotRecords([]);
+    lastBallPosRef.current = { x: level.ball.x, y: level.ball.y };
+    setSavedThisRun(false);
   }, [level]);
 
   const handlePause = useCallback(() => {
@@ -163,6 +207,14 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
     }
     return suggestions;
   }
+
+  const replayTrajectories: ReplayShotTrajectory[] = useMemo(() => {
+    if (!bestRoute || !showReplay) return [];
+    return simulateRoute(level, config, bestRoute);
+  }, [bestRoute, showReplay, level.id]);
+
+  const replayTrajectoriesRef = useRef<ReplayShotTrajectory[]>([]);
+  replayTrajectoriesRef.current = replayTrajectories;
 
   const tutorialSteps: TutorialStep[] = [
     {
@@ -242,6 +294,10 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
           break;
         case "ballStop":
           setShots(stateRef.current.shotsRemaining);
+          lastBallPosRef.current = {
+            x: stateRef.current.ball.x,
+            y: stateRef.current.ball.y,
+          };
           if (stateRef.current.shotsRemaining > 0) {
             setPhase("aim");
           }
@@ -513,6 +569,110 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         }
       }
 
+      const reTraj = replayTrajectoriesRef.current;
+      if (reTraj.length > 0) {
+        for (let sIdx = 0; sIdx < reTraj.length; sIdx++) {
+          const traj = reTraj[sIdx];
+          const pts = traj.points;
+          const isFutureShot = sIdx >= shotRecordsRef.current.length;
+
+          if (pts.length > 1) {
+            ctx.save();
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            for (let i = 0; i < pts.length - 1; i++) {
+              const t = i / (pts.length - 1);
+              const lineAlpha = isFutureShot
+                ? 0.35 * (1 - t * 0.5)
+                : 0.2 * (1 - t * 0.5);
+              const lineWidth = isFutureShot ? 2.5 : 1.5;
+
+              ctx.beginPath();
+              ctx.moveTo(pts[i].x, pts[i].y);
+              ctx.lineTo(pts[i + 1].x, pts[i + 1].y);
+              ctx.strokeStyle = isFutureShot
+                ? `rgba(250, 204, 21, ${lineAlpha})`
+                : `rgba(148, 163, 184, ${lineAlpha})`;
+              ctx.lineWidth = lineWidth;
+              ctx.stroke();
+            }
+            ctx.restore();
+          }
+
+          if (isFutureShot && pts.length > 0) {
+            const markerSpacing = Math.max(1, Math.floor(pts.length / 8));
+            for (let i = 0; i < pts.length; i += markerSpacing) {
+              const p = pts[i];
+              const t = i / (pts.length - 1 || 1);
+              ctx.beginPath();
+              ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+              ctx.fillStyle = `rgba(250, 204, 21, ${0.3 * (1 - t * 0.4)})`;
+              ctx.fill();
+            }
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(traj.startX, traj.startY, b.radius * 0.8, 0, Math.PI * 2);
+            ctx.strokeStyle = "rgba(250, 204, 21, 0.45)";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+          }
+        }
+
+        const currentShotIdx = shotRecordsRef.current.length;
+        if (currentShotIdx < reTraj.length) {
+          const nextTraj = reTraj[currentShotIdx];
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(nextTraj.startX, nextTraj.startY, b.radius + 4, 0, Math.PI * 2);
+          ctx.strokeStyle = "rgba(250, 204, 21, 0.6)";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.fillStyle = "rgba(250, 204, 21, 0.15)";
+          ctx.fill();
+          ctx.restore();
+
+          const dx = nextTraj.points[0] ? nextTraj.points[0].x - nextTraj.startX : 0;
+          const dy = nextTraj.points[0] ? nextTraj.points[0].y - nextTraj.startY : 0;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 0.5) {
+            const ang = Math.atan2(dy, dx);
+            const arrowLen = 18;
+            const tipX = nextTraj.startX + Math.cos(ang) * arrowLen;
+            const tipY = nextTraj.startY + Math.sin(ang) * arrowLen;
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(nextTraj.startX, nextTraj.startY);
+            ctx.lineTo(tipX, tipY);
+            ctx.strokeStyle = "rgba(250, 204, 21, 0.7)";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([3, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            const ah = 6;
+            const aw = 4;
+            ctx.beginPath();
+            ctx.moveTo(tipX, tipY);
+            ctx.lineTo(
+              tipX - Math.cos(ang) * ah + Math.sin(ang) * aw,
+              tipY - Math.sin(ang) * ah - Math.cos(ang) * aw
+            );
+            ctx.lineTo(
+              tipX - Math.cos(ang) * ah - Math.sin(ang) * aw,
+              tipY - Math.sin(ang) * ah + Math.cos(ang) * aw
+            );
+            ctx.closePath();
+            ctx.fillStyle = "rgba(250, 204, 21, 0.8)";
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+      }
+
       ctx.save();
       ctx.translate(b.x, b.y);
       const spd = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
@@ -748,8 +908,17 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
       if (!dragRef.current) return;
       e.preventDefault();
       const s = stateRef.current;
-      const launched = applyLaunch(s, dragRef.current.x, dragRef.current.y, config);
+      const launchPos = { ...dragRef.current };
+      const launched = applyLaunch(s, launchPos.x, launchPos.y, config);
       if (launched) {
+        const record: ShotRecord = {
+          ballX: lastBallPosRef.current.x,
+          ballY: lastBallPosRef.current.y,
+          dragX: launchPos.x,
+          dragY: launchPos.y,
+        };
+        shotRecordsRef.current = [...shotRecordsRef.current, record];
+        setShotRecords(shotRecordsRef.current);
         setPhase("fly");
       }
       dragRef.current = null;
@@ -832,6 +1001,19 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
         <button className="btn-tutorial" onClick={() => setShowTutorial(true)}>
           ❓ 帮助
         </button>
+        {bestRoute && !showResult && (
+          <button
+            className={showReplay ? "btn-replay active" : "btn-replay"}
+            onClick={() => setShowReplay((v) => !v)}
+            title={
+              isCustomLevel(level.id)
+                ? `自定义关卡最佳路线（${bestRoute.stars}★，${bestRoute.shotsUsed}次）`
+                : `最佳路线（${bestRoute.stars}★，${bestRoute.shotsUsed}次）`
+            }
+          >
+            {showReplay ? "👁 隐藏路线" : "👁 显示路线"}
+          </button>
+        )}
         {!showResult && (
           <button className="btn-pause" onClick={isPaused ? handleResume : handlePause}>
             {isPaused ? "▶️ 继续" : "⏸ 暂停"}
