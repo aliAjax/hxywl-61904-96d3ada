@@ -132,6 +132,17 @@ export const DEFAULT_CONFIG: PhysicsConfig = {
   subStepSafeRatio: 0.25,
 };
 
+const SAFE_OBSTACLE_TYPES = new Set([
+  "wall", "oneTime", "slowZone", "movingHorizontal", "movingVertical",
+]);
+
+function safeObstacleType(t: string | undefined): ObstacleState["type"] {
+  if (t && SAFE_OBSTACLE_TYPES.has(t)) {
+    return t as ObstacleState["type"];
+  }
+  return "wall";
+}
+
 export function createPhysicsState(
   level: LevelDef,
   config: PhysicsConfig
@@ -157,7 +168,7 @@ export function createPhysicsState(
       y: o.y,
       w: o.w,
       h: o.h,
-      type: o.type || "wall",
+      type: safeObstacleType(o.type),
       destroyed: false,
       destroyAnim: 0,
       baseX: o.x,

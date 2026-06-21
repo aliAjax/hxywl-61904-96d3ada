@@ -17,6 +17,7 @@ import {
   saveCustomLevel,
   updateStarRulesForLevel,
 } from "./customLevels";
+import { encodeChallengeCode } from "./challengeCode";
 
 type Tool = "select" | "ball" | "goal" | "star" | "wall" | "oneTime" | "slowZone" | "movingHorizontal" | "movingVertical" | "delete";
 
@@ -53,6 +54,10 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
   }>({});
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [showPlayWarning, setShowPlayWarning] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [shareCode, setShareCode] = useState("");
+  const [shareCodeLoading, setShareCodeLoading] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewport = useGameViewport();
@@ -210,6 +215,19 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(dirArrow, ob.x + ob.w / 2, ob.y + ob.h / 2);
+        } else {
+          ctx.fillStyle = isSelected ? "#60a5fa" : "#475569";
+          ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.strokeStyle = "#94a3b8";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          ctx.strokeRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.setLineDash([]);
+          ctx.fillStyle = "rgba(148,163,184,0.7)";
+          ctx.font = "bold 12px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("?", ob.x + ob.w / 2, ob.y + ob.h / 2);
         }
 
         if (hasIssue) {
@@ -724,6 +742,44 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
     setShowPlayWarning(false);
   }, []);
 
+  const handleShareCode = useCallback(async () => {
+    setShowShareDialog(true);
+    setShareCode("");
+    setShareCodeLoading(true);
+    setShareCopied(false);
+    try {
+      const trimmedName = levelName.trim();
+      const levelToShare = normalizeLevel(updateStarRulesForLevel({
+        ...level,
+        name: trimmedName || "自定义关卡",
+      }));
+      const code = await encodeChallengeCode(levelToShare);
+      setShareCode(code);
+    } catch {
+      setShareCode("生成失败，请重试");
+    } finally {
+      setShareCodeLoading(false);
+    }
+  }, [level, levelName]);
+
+  const handleCopyShareCode = useCallback(async () => {
+    if (!shareCode) return;
+    try {
+      await navigator.clipboard.writeText(shareCode);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = shareCode;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    }
+  }, [shareCode]);
+
   const handleBackFromPlay = useCallback(() => {
     setIsPlaying(false);
     setPlayLevel(null);
@@ -846,6 +902,9 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
           {dirty && <span className="dirty-badge">未保存</span>}
         </div>
         <div className="editor-header-right">
+          <button className="btn-share-code" onClick={handleShareCode}>
+            🔗 分享码
+          </button>
           <button className="btn-play" onClick={handlePlay}>
             ▶ 试玩
           </button>
@@ -1239,6 +1298,35 @@ export default function LevelEditor({ level: initialLevel, onBack, onSave, isNew
                 继续试玩
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showShareDialog && (
+        <div className="challenge-overlay" onClick={() => setShowShareDialog(false)}>
+          <div className="challenge-dialog" onClick={(e) => e.stopPropagation()}>
+            <button className="challenge-dialog-close" onClick={() => setShowShareDialog(false)}>✕</button>
+            <h3 className="challenge-dialog-title">🔗 分享挑战码</h3>
+            <p className="challenge-dialog-desc">将下方挑战码复制发送给好友，对方粘贴后即可试玩你的关卡</p>
+            <div className="share-code-wrap">
+              {shareCodeLoading ? (
+                <div className="share-code-loading">生成中...</div>
+              ) : (
+                <textarea
+                  className="share-code-textarea"
+                  value={shareCode}
+                  readOnly
+                  onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+                />
+              )}
+            </div>
+            <button
+              className="btn-copy-code"
+              onClick={handleCopyShareCode}
+              disabled={shareCodeLoading || !shareCode}
+            >
+              {shareCopied ? "✓ 已复制" : "📋 复制挑战码"}
+            </button>
           </div>
         </div>
       )}

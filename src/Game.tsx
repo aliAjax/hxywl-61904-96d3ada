@@ -512,6 +512,19 @@ export default function Game({ level, progress, onBack, onComplete, onNext }: Pr
           ctx.textBaseline = "middle";
           ctx.fillText(dirArrow, ob.x + ob.w / 2, ob.y + ob.h / 2);
           ctx.restore();
+        } else {
+          ctx.fillStyle = "#475569";
+          ctx.fillRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.strokeStyle = "#94a3b8";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          ctx.strokeRect(ob.x, ob.y, ob.w, ob.h);
+          ctx.setLineDash([]);
+          ctx.fillStyle = "rgba(148,163,184,0.6)";
+          ctx.font = "bold 10px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("?", ob.x + ob.w / 2, ob.y + ob.h / 2);
         }
       });
 

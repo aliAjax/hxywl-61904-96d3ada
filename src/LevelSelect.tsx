@@ -1,8 +1,15 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { levels, LevelDef } from "./levels";
 import { Progress, isUnlocked, getStars } from "./progress";
 import Tutorial, { TutorialStep } from "./Tutorial";
-import { exportLevel, importLevel } from "./customLevels";
+import {
+  encodeChallengeCode,
+  decodeChallengeCode,
+  getLevelShareSummary,
+  OBSTACLE_TYPE_LABELS,
+  ChallengeCodeResult,
+  ChallengeCodeWarning,
+} from "./challengeCode";
 
 type FilterType = "all" | "notCleared" | "cleared" | "notFullStars" | "custom";
 type SortType = "id" | "stars";
@@ -19,6 +26,8 @@ interface Props {
   onDeleteLevel: (levelId: number) => void;
   onExportLevel: (level: LevelDef) => void;
   onImportLevel: () => void;
+  onChallengePlay: (level: LevelDef) => void;
+  onChallengeSave: (level: LevelDef) => void;
   customLevels: LevelDef[];
 }
 
@@ -34,7 +43,7 @@ function StarRow(count: number, size: "sm" | "md" = "md") {
   );
 }
 
-export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditLevel, onDeleteLevel, onExportLevel, onImportLevel, customLevels }: Props) {
+export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditLevel, onDeleteLevel, onExportLevel, onImportLevel, onChallengePlay, onChallengeSave, customLevels }: Props) {
   const totalLevels = levels.length + customLevels.length;
   const [showTutorial, setShowTutorial] = useState(false);
   const [hoveredLevel, setHoveredLevel] = useState<LevelDef | null>(null);
@@ -42,6 +51,14 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
   const [filter, setFilter] = useState<FilterType>("all");
   const [sort, setSort] = useState<SortType>("id");
   const [rulesPanelLevel, setRulesPanelLevel] = useState<LevelDefWithCustom | null>(null);
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [shareCode, setShareCode] = useState("");
+  const [shareCodeLoading, setShareCodeLoading] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [importCodeText, setImportCodeText] = useState("");
+  const [importResult, setImportResult] = useState<ChallengeCodeResult | null>(null);
+  const [importParsing, setImportParsing] = useState(false);
 
   let clearedCount = 0;
   let totalStars = 0;
@@ -141,6 +158,58 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
     },
   ];
 
+  const handleShareLevel = useCallback(async (level: LevelDef) => {
+    setShowShareDialog(true);
+    setShareCode("");
+    setShareCodeLoading(true);
+    setShareCopied(false);
+    try {
+      const code = await encodeChallengeCode(level);
+      setShareCode(code);
+    } catch {
+      setShareCode("生成失败，请重试");
+    } finally {
+      setShareCodeLoading(false);
+    }
+  }, []);
+
+  const handleCopyShareCode = useCallback(async () => {
+    if (!shareCode) return;
+    try {
+      await navigator.clipboard.writeText(shareCode);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = shareCode;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    }
+  }, [shareCode]);
+
+  const handleParseChallengeCode = useCallback(async () => {
+    if (!importCodeText.trim()) return;
+    setImportParsing(true);
+    try {
+      const result = await decodeChallengeCode(importCodeText.trim());
+      setImportResult(result);
+    } catch {
+      setImportResult({ success: false, error: "解析挑战码时发生错误" });
+    } finally {
+      setImportParsing(false);
+    }
+  }, [importCodeText]);
+
+  const handleCloseImportDialog = useCallback(() => {
+    setShowImportDialog(false);
+    setImportCodeText("");
+    setImportResult(null);
+  }, []);
+
   return (
     <div className="level-select">
       <div className="level-select-header">
@@ -154,6 +223,9 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
           </button>
           <button className="btn-import-level" onClick={onImportLevel}>
             📥 导入关卡
+          </button>
+          <button className="btn-challenge-import" onClick={() => { setShowImportDialog(true); setImportResult(null); setImportCodeText(""); }}>
+            🔗 挑战码
           </button>
         </div>
         <div className="progress-summary">
@@ -269,6 +341,12 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
                         onClick={() => onEditLevel(lv.id)}
                       >
                         ✏ 编辑
+                      </button>
+                      <button
+                        className="btn-share-small"
+                        onClick={() => handleShareLevel(lv)}
+                      >
+                        🔗
                       </button>
                       <button
                         className="btn-export-small"
@@ -440,6 +518,160 @@ export default function LevelSelect({ progress, onSelect, onCreateLevel, onEditL
             收集星星并在限定次数内抵达终点
           </div>
         </div>
+        </div>
+      )}
+
+      {showShareDialog && (
+        <div className="challenge-overlay" onClick={() => setShowShareDialog(false)}>
+          <div className="challenge-dialog" onClick={(e) => e.stopPropagation()}>
+            <button className="challenge-dialog-close" onClick={() => setShowShareDialog(false)}>✕</button>
+            <h3 className="challenge-dialog-title">🔗 分享挑战码</h3>
+            <p className="challenge-dialog-desc">将下方挑战码复制发送给好友，对方粘贴后即可试玩你的关卡</p>
+            <div className="share-code-wrap">
+              {shareCodeLoading ? (
+                <div className="share-code-loading">生成中...</div>
+              ) : (
+                <textarea
+                  className="share-code-textarea"
+                  value={shareCode}
+                  readOnly
+                  onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+                />
+              )}
+            </div>
+            <button
+              className="btn-copy-code"
+              onClick={handleCopyShareCode}
+              disabled={shareCodeLoading || !shareCode}
+            >
+              {shareCopied ? "✓ 已复制" : "📋 复制挑战码"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showImportDialog && (
+        <div className="challenge-overlay" onClick={handleCloseImportDialog}>
+          <div className="challenge-dialog challenge-dialog-wide" onClick={(e) => e.stopPropagation()}>
+            <button className="challenge-dialog-close" onClick={handleCloseImportDialog}>✕</button>
+            <h3 className="challenge-dialog-title">🔗 导入挑战码</h3>
+            <p className="challenge-dialog-desc">粘贴好友分享的挑战码，解析后可试玩或保存</p>
+            {!importResult?.success && (
+              <>
+                <textarea
+                  className="import-code-textarea"
+                  value={importCodeText}
+                  onChange={(e) => { setImportCodeText(e.target.value); setImportResult(null); }}
+                  placeholder="在此粘贴挑战码（以 HX1- 或 HX1Z- 开头）"
+                  rows={4}
+                />
+                <button
+                  className="btn-parse-code"
+                  onClick={handleParseChallengeCode}
+                  disabled={importParsing || !importCodeText.trim()}
+                >
+                  {importParsing ? "解析中..." : "🔍 解析挑战码"}
+                </button>
+                {importResult && !importResult.success && importResult.error && (
+                  <div className="import-code-error">
+                    <span className="import-code-error-icon">⚠</span>
+                    <span>{importResult.error}</span>
+                  </div>
+                )}
+              </>
+            )}
+            {importResult?.success && importResult.level && (
+              <div className="import-preview">
+                <div className="import-preview-header">
+                  <span className="import-preview-name">{importResult.level.name}</span>
+                </div>
+                {importResult.warnings && importResult.warnings.length > 0 && (
+                  <div className="import-warnings">
+                    <div className="import-warnings-title">
+                      ⚠ 提示（{importResult.warnings.length}）
+                    </div>
+                    <div className="import-warnings-list">
+                      {importResult.warnings.map((w: ChallengeCodeWarning, i: number) => (
+                        <div key={i} className={"import-warning-item " + w.type}>
+                          <span className="import-warning-icon">
+                            {w.type === "obstacleDowngraded" ? "🔧" :
+                             w.type === "obstacleFiltered" ? "🚫" :
+                             w.type === "valueClamped" ? "📐" : "⚠️"}
+                          </span>
+                          <span className="import-warning-text">
+                            {w.message}
+                            {w.detail && (
+                              <span className="import-warning-detail">（{w.detail}）</span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="import-preview-stats">
+                  <div className="import-preview-stat">
+                    <span className="import-preview-stat-label">弹射次数</span>
+                    <span className="import-preview-stat-value">{importResult.level.maxShots}</span>
+                  </div>
+                  <div className="import-preview-stat">
+                    <span className="import-preview-stat-label">重力</span>
+                    <span className="import-preview-stat-value">{importResult.level.gravity}</span>
+                  </div>
+                  <div className="import-preview-stat">
+                    <span className="import-preview-stat-label">反弹</span>
+                    <span className="import-preview-stat-value">{importResult.level.bounce}</span>
+                  </div>
+                  <div className="import-preview-stat">
+                    <span className="import-preview-stat-label">星星</span>
+                    <span className="import-preview-stat-value">{importResult.level.stars.length}</span>
+                  </div>
+                  <div className="import-preview-stat">
+                    <span className="import-preview-stat-label">障碍</span>
+                    <span className="import-preview-stat-value">{importResult.level.obstacles.length}</span>
+                  </div>
+                </div>
+                {getLevelShareSummary(importResult.level).obstacleBreakdown.length > 0 && (
+                  <div className="import-preview-breakdown">
+                    {getLevelShareSummary(importResult.level).obstacleBreakdown.map((item) => (
+                      <span key={item.type} className="import-preview-tag">
+                        {OBSTACLE_TYPE_LABELS[item.type] || item.type} ×{item.count}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="import-preview-rules">
+                  <div className="import-preview-rules-title">星级规则</div>
+                  {importResult.level.starRules.stars.map((rule, i) => (
+                    <div key={i} className="import-preview-rule">
+                      <span className="import-preview-rule-star">{'★'.repeat(i + 1)}{'☆'.repeat(Math.max(0, 3 - i - 1))}</span>
+                      <span className="import-preview-rule-desc">{rule.description}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="import-preview-actions">
+                  <button
+                    className="btn-challenge-try"
+                    onClick={() => {
+                      onChallengePlay(importResult.level!);
+                      handleCloseImportDialog();
+                    }}
+                  >
+                    ▶ 试玩
+                  </button>
+                  <button
+                    className="btn-challenge-save"
+                    onClick={() => {
+                      onChallengeSave(importResult.level!);
+                      handleCloseImportDialog();
+                    }}
+                  >
+                    💾 保存关卡
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

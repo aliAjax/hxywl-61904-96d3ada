@@ -12,6 +12,7 @@ import {
   exportLevel,
   importLevel,
   ImportResult,
+  saveCustomLevel,
 } from "./customLevels";
 import { useDataStore } from "./useDataStore";
 import DataRecoveryNotice from "./DataRecoveryNotice";
@@ -21,6 +22,7 @@ const GAME_ID = "hxywl-61904";
 type View =
   | { kind: "select" }
   | { kind: "play"; levelId: number }
+  | { kind: "playChallenge"; level: LevelDef }
   | { kind: "editor"; levelId?: number; isNew: boolean };
 
 function App() {
@@ -123,6 +125,16 @@ function App() {
     e.target.value = "";
   }, [refreshCustomLevels]);
 
+  const handleChallengePlay = useCallback((level: LevelDef) => {
+    setView({ kind: "playChallenge", level });
+  }, []);
+
+  const handleChallengeSave = useCallback((level: LevelDef) => {
+    const newId = getNextCustomId();
+    saveCustomLevel({ ...level, id: newId });
+    refreshCustomLevels();
+  }, [refreshCustomLevels]);
+
   const currentLevel = allLevels.find(
     (l) => l.id === (view.kind === "play" ? view.levelId : 0)
   );
@@ -176,6 +188,8 @@ function App() {
             onDeleteLevel={handleDeleteLevel}
             onExportLevel={handleExportLevel}
             onImportLevel={handleImportLevel}
+            onChallengePlay={handleChallengePlay}
+            onChallengeSave={handleChallengeSave}
             customLevels={customLevels}
           />
           <div className="data-management-section">
@@ -198,6 +212,17 @@ function App() {
           onBack={handleBack}
           onComplete={handleComplete}
           onNext={handleNext}
+        />
+      )}
+
+      {view.kind === "playChallenge" && (
+        <Game
+          key={`challenge-${view.level.name}-${Date.now()}`}
+          level={view.level}
+          progress={progress}
+          onBack={handleBack}
+          onComplete={() => {}}
+          onNext={handleBack}
         />
       )}
 

@@ -478,13 +478,22 @@ export interface ValidationResult {
   issues: ValidationIssue[];
 }
 
+const VALID_OBSTACLE_TYPES = new Set([
+  "wall", "oneTime", "slowZone", "movingHorizontal", "movingVertical",
+]);
+
 export function normalizeObstacleDef(ob: ObstacleDef): ObstacleDef {
+  let safeType = ob.type || "wall";
+  if (!VALID_OBSTACLE_TYPES.has(safeType)) {
+    safeType = "wall";
+  }
+
   const result: ObstacleDef = {
     x: ob.x,
     y: ob.y,
     w: Math.max(10, ob.w),
     h: Math.max(10, ob.h),
-    type: ob.type || "wall",
+    type: safeType as ObstacleDef["type"],
   };
 
   if (result.type === "movingHorizontal" || result.type === "movingVertical") {
@@ -533,11 +542,12 @@ export function validateObstacleFields(ob: unknown, idx: number): FieldValidatio
   }
 
   const validTypes = ["wall", "oneTime", "slowZone", "movingHorizontal", "movingVertical"];
-  if (o.type !== undefined && !validTypes.includes(o.type as string)) {
-    return { valid: false, error: `障碍 #${idx + 1} 类型无效` };
+  if (o.type !== undefined && typeof o.type !== "string") {
+    return { valid: false, error: `障碍 #${idx + 1} 类型格式无效` };
   }
 
-  if (o.type === "movingHorizontal" || o.type === "movingVertical") {
+  const isMovingType = o.type === "movingHorizontal" || o.type === "movingVertical";
+  if (isMovingType) {
     if (o.moveRange !== undefined) {
       if (typeof o.moveRange !== "number" || isNaN(o.moveRange)) {
         return { valid: false, error: `障碍 #${idx + 1} moveRange 必须是数字` };
