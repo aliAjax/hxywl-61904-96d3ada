@@ -37,7 +37,17 @@ import {
   ChallengeCodeResult,
 } from "../src/challengeCode";
 
-import { DEFAULT_CONFIG } from "../src/physics";
+import {
+  DEFAULT_CONFIG,
+  createPhysicsState,
+  resetBall,
+  resetAll,
+  tickPhysics,
+  computeLaunchVelocity,
+  applyLaunch,
+  predictTrajectory,
+  PhysicsState,
+} from "../src/physics";
 
 const sampleLevel: LevelDef = levels[0];
 
@@ -761,6 +771,386 @@ suite("挑战码 - 编解码往返", () => {
     assertEqual(decoded.level!.obstacles[1].type, "movingHorizontal");
     assertEqual(decoded.level!.maxShots, 4);
     assertEqual(decoded.level!.starRules.stars.length, 3);
+  });
+});
+
+suite("物理引擎 - 状态初始化", () => {
+  test("createPhysicsState 正确初始化物理状态", () => {
+    dataStore.reset();
+    const state = createPhysicsState(sampleLevel, DEFAULT_CONFIG);
+    assertEqual(state.ball.x, sampleLevel.ball.x);
+    assertEqual(state.ball.y, sampleLevel.ball.y);
+    assertEqual(state.ball.vx, 0);
+    assertEqual(state.ball.vy, 0);
+    assertEqual(state.phase, "aim");
+    assertEqual(state.shotsRemaining, sampleLevel.maxShots);
+    assertEqual(state.shotsUsed, 0);
+    assertEqual(state.collected, 0);
+    assertFalse(state.cleared);
+    assertEqual(state.stars.length, sampleLevel.stars.length);
+    assertEqual(state.obstacles.length, sampleLevel.obstacles.length);
+  });
+
+  test("createPhysicsState 星星初始化为未收集状态", () => {
+    dataStore.reset();
+    const state = createPhysicsState(sampleLevel, DEFAULT_CONFIG);
+    for (const star of state.stars) {
+      assertFalse(star.collected);
+    }
+  });
+
+  test("resetBall 重置小球位置和速度", () => {
+    dataStore.reset();
+    const state = createPhysicsState(sampleLevel, DEFAULT_CONFIG);
+    state.ball.x = 999;
+    state.ball.y = 999;
+    state.ball.vx = 10;
+    state.ball.vy = 10;
+    state.phase = "fly";
+
+    resetBall(state, sampleLevel);
+
+    assertEqual(state.ball.x, sampleLevel.ball.x);
+    assertEqual(state.ball.y, sampleLevel.ball.y);
+    assertEqual(state.ball.vx, 0);
+    assertEqual(state.ball.vy, 0);
+    assertEqual(state.phase, "aim");
+  });
+
+  test("resetAll 完全重置所有状态", () => {
+    dataStore.reset();
+    const state = createPhysicsState(sampleLevel, DEFAULT_CONFIG);
+    state.ball.x = 999;
+    state.collected = 3;
+    state.cleared = true;
+    state.stars[0].collected = true;
+
+    resetAll(state, sampleLevel, DEFAULT_CONFIG);
+
+    assertEqual(state.ball.x, sampleLevel.ball.x);
+    assertEqual(state.collected, 0);
+    assertFalse(state.cleared);
+    assertFalse(state.stars[0].collected);
+    assertEqual(state.phase, "aim");
+  });
+});
+
+suite("物理引擎 - 发射计算", () => {
+  test("computeLaunchVelocity 距离太近时返回 null", () => {
+    dataStore.reset();
+    const result = computeLaunchVelocity(100, 400, 105, 400, DEFAULT_CONFIG);
+    assertTrue(result === null);
+  });
+
+  test("computeLaunchVelocity 正常距离返回有效速度", () => {
+    dataStore.reset();
+    const result = computeLaunchVelocity(100, 400, 200, 400, DEFAULT_CONFIG);
+    assertTrue(result !== null);
+    assertTrue(result!.vx < 0);
+    assertEqual(result!.vy, 0);
+    assertTrue(result!.power > 0);
+  });
+
+  test("computeLaunchVelocity 发射方向与拖拽方向相反", () => {
+    dataStore.reset();
+    const result = computeLaunchVelocity(100, 400, 50, 350, DEFAULT_CONFIG);
+    assertTrue(result !== null);
+    assertTrue(result!.vx > 0);
+    assertTrue(result!.vy > 0);
+  });
+
+  test("computeLaunchVelocity 距离超过 maxDrag 时被限制", () => {
+    dataStore.reset();
+    const farResult = computeLaunchVelocity(100, 400, 500, 400, DEFAULT_CONFIG);
+    const nearResult = computeLaunchVelocity(100, 400, 200, 400, DEFAULT_CONFIG);
+    assertTrue(farResult !== null && nearResult !== null);
+    assertTrue(farResult!.clampedDist >= nearResult!.clampedDist);
+    assertTrue(farResult!.clampedDist <= DEFAULT_CONFIG.maxDrag);
+  });
+
+  test("applyLaunch 成功应用发射并切换到飞行状态", () => {
+    dataStore.reset();
+    const state = createPhysicsState(sampleLevel, DEFAULT_CONFIG);
+    const applied = applyLaunch(state, 200, 400, DEFAULT_CONFIG);
+    assertTrue(applied);
+    assertEqual(state.phase, "fly");
+    assertTrue(state.ball.vx !== 0 || state.ball.vy !== 0);
+  });
+
+  test("applyLaunch 距离太近时不发射", () => {
+    dataStore.reset();
+    const state = createPhysicsState(sampleLevel, DEFAULT_CONFIG);
+    const applied = applyLaunch(state, 101, 400, DEFAULT_CONFIG);
+    assertFalse(applied);
+    assertEqual(state.phase, "aim");
+  });
+});
+
+suite("物理引擎 - 物理更新", () => {
+  test("tickPhysics 在 aim 阶段不产生位置变化", () => {
+    dataStore.reset();
+    const state = createPhysicsState(sampleLevel, DEFAULT_CONFIG);
+    const startX = state.ball.x;
+    const startY = state.ball.y;
+
+    tickPhysics(state, sampleLevel, DEFAULT_CONFIG, 16);
+
+    assertEqual(state.ball.x, startX);
+    assertEqual(state.ball.y, startY);
+  });
+
+  test("tickPhysics 在 fly 阶段受重力影响", () => {
+    dataStore.reset();
+    const state = createPhysicsState(sampleLevel, DEFAULT_CONFIG);
+    state.ball.vx = 5;
+    state.ball.vy = 0;
+    state.phase = "fly";
+    const startVy = state.ball.vy;
+
+    const startY = state.ball.y;
+    for (let i = 0; i < 20; i++) {
+      tickPhysics(state, sampleLevel, DEFAULT_CONFIG, 16);
+      if (state.phase !== "fly") break;
+    }
+
+    assertTrue(state.ball.y > startY, "小球 y 坐标应该因重力而增加");
+  });
+
+  test("tickPhysics 小球速度受摩擦衰减", () => {
+    dataStore.reset();
+    const level: LevelDef = {
+      ...sampleLevel,
+      gravity: 0,
+    };
+    const state = createPhysicsState(level, DEFAULT_CONFIG);
+    state.ball.vx = 10;
+    state.ball.vy = 0;
+    state.phase = "fly";
+
+    const startSpeed = Math.abs(state.ball.vx);
+    for (let i = 0; i < 10; i++) {
+      tickPhysics(state, level, DEFAULT_CONFIG, 16);
+    }
+
+    assertTrue(Math.abs(state.ball.vx) < startSpeed);
+  });
+
+  test("tickPhysics 小球碰到边界会反弹", () => {
+    dataStore.reset();
+    const state = createPhysicsState(sampleLevel, DEFAULT_CONFIG);
+    state.ball.x = 20;
+    state.ball.vx = -10;
+    state.ball.y = 250;
+    state.ball.vy = 0;
+    state.phase = "fly";
+
+    let allEvents: any[] = [];
+    for (let i = 0; i < 10; i++) {
+      const events = tickPhysics(state, sampleLevel, DEFAULT_CONFIG, 16);
+      allEvents = allEvents.concat(events);
+      if (allEvents.some((e) => e.type === "boundaryBounce")) break;
+    }
+
+    assertTrue(allEvents.some((e) => e.type === "boundaryBounce"));
+    assertTrue(state.ball.vx > 0);
+  });
+
+  test("tickPhysics 收集星星增加 collected 计数", () => {
+    dataStore.reset();
+    const level: LevelDef = {
+      ...sampleLevel,
+      stars: [{ x: 150, y: 400 }],
+    };
+    const state = createPhysicsState(level, DEFAULT_CONFIG);
+    state.ball.x = 100;
+    state.ball.vx = 10;
+    state.ball.y = 400;
+    state.ball.vy = 0;
+    state.phase = "fly";
+
+    assertEqual(state.collected, 0);
+
+    for (let i = 0; i < 20; i++) {
+      tickPhysics(state, level, DEFAULT_CONFIG, 16);
+      if (state.collected > 0) break;
+    }
+
+    assertEqual(state.collected, 1);
+    assertTrue(state.stars[0].collected);
+  });
+
+  test("tickPhysics 小球到达终点通关", () => {
+    dataStore.reset();
+    const level: LevelDef = {
+      ...sampleLevel,
+      goal: { x: 200, y: 400 },
+    };
+    const state = createPhysicsState(level, DEFAULT_CONFIG);
+    state.ball.x = 100;
+    state.ball.vx = 15;
+    state.ball.y = 400;
+    state.ball.vy = 0;
+    state.phase = "fly";
+
+    let events = [];
+    for (let i = 0; i < 30; i++) {
+      events = tickPhysics(state, level, DEFAULT_CONFIG, 16);
+      if (state.cleared) break;
+    }
+
+    assertTrue(state.cleared);
+    assertEqual(state.phase, "done");
+  });
+
+  test("tickPhysics 弹药用尽且未通关时失败", () => {
+    dataStore.reset();
+    const level: LevelDef = {
+      ...sampleLevel,
+      maxShots: 1,
+      goal: { x: 900, y: 900 },
+    };
+    const state = createPhysicsState(level, DEFAULT_CONFIG);
+    state.ball.x = 100;
+    state.ball.vx = 2;
+    state.ball.y = 400;
+    state.ball.vy = 0;
+    state.phase = "fly";
+
+    let allEvents: any[] = [];
+    let hasLevelFail = false;
+    for (let i = 0; i < 500; i++) {
+      const events = tickPhysics(state, level, DEFAULT_CONFIG, 16);
+      allEvents = allEvents.concat(events);
+      if (events.some((e) => e.type === "levelFail")) {
+        hasLevelFail = true;
+        break;
+      }
+      if (state.phase === "aim") {
+        state.phase = "fly";
+        state.ball.vx = 2;
+      }
+    }
+
+    assertTrue(hasLevelFail, "应该触发 levelFail 事件");
+    assertTrue(state.shotsUsed >= 1);
+  });
+});
+
+suite("物理引擎 - 轨迹预测", () => {
+  test("predictTrajectory 返回预测点数组", () => {
+    dataStore.reset();
+    const state = createPhysicsState(sampleLevel, DEFAULT_CONFIG);
+    const points = predictTrajectory(state, sampleLevel, DEFAULT_CONFIG, -5, -2);
+    assertTrue(Array.isArray(points));
+    assertTrue(points.length > 0);
+    assertEqual(typeof points[0].x, "number");
+    assertEqual(typeof points[0].y, "number");
+  });
+
+  test("predictTrajectory 点的数量不超过 predictSteps", () => {
+    dataStore.reset();
+    const state = createPhysicsState(sampleLevel, DEFAULT_CONFIG);
+    const points = predictTrajectory(state, sampleLevel, DEFAULT_CONFIG, -5, -2);
+    assertTrue(points.length <= DEFAULT_CONFIG.predictSteps);
+  });
+
+  test("predictTrajectory 水平发射时 y 坐标递增（受重力）", () => {
+    dataStore.reset();
+    const state = createPhysicsState(sampleLevel, DEFAULT_CONFIG);
+    const points = predictTrajectory(state, sampleLevel, DEFAULT_CONFIG, 5, 0);
+    assertTrue(points.length > 2);
+    assertTrue(points[points.length - 1].y > points[0].y);
+  });
+});
+
+suite("数据存储 - 数据有效性验证", () => {
+  test("dataStore reset 后返回有效默认数据", () => {
+    dataStore.reset();
+    const data = dataStore.getCurrentData();
+    assertEqual(data.version, 2);
+    assertTrue(data.meta.createdAt > 0);
+    assertTrue(data.meta.updatedAt > 0);
+    assertTrue(typeof data.progress === "object");
+    assertTrue(Array.isArray(data.customLevels));
+    assertFalse(data.tutorialCompleted);
+  });
+
+  test("dataStore load 返回有效数据和恢复状态", () => {
+    dataStore.reset();
+    const result = dataStore.load();
+    assertTrue(result.data !== undefined);
+    assertTrue(result.recovery !== undefined);
+    assertTrue(result.recovery.type !== undefined);
+  });
+
+  test("dataStore save 后 updatedAt 更新", () => {
+    dataStore.reset();
+    const before = dataStore.getCurrentData();
+    const beforeTime = before.meta.updatedAt;
+
+    const updated = {
+      ...before,
+      tutorialCompleted: true,
+    };
+    dataStore.save(updated);
+
+    const after = dataStore.getCurrentData();
+    assertTrue(after.meta.updatedAt >= beforeTime);
+    assertTrue(after.tutorialCompleted);
+  });
+});
+
+suite("关卡数据 - 全部关卡有效性校验", () => {
+  test("所有内置关卡通过 validateLevel 校验", () => {
+    for (let i = 0; i < levels.length; i++) {
+      const level = levels[i];
+      const result = validateLevel(
+        level,
+        DEFAULT_CONFIG.ballRadius,
+        DEFAULT_CONFIG.goalRadius,
+        DEFAULT_CONFIG.starRadius
+      );
+      assertTrue(
+        result.valid,
+        `第 ${level.id} 关「${level.name}」校验失败: ${result.issues.map((i) => i.message).join(", ")}`
+      );
+    }
+  });
+
+  test("所有内置关卡的星级规则条目不超过 3 条", () => {
+    for (const level of levels) {
+      assertTrue(
+        level.starRules.stars.length <= 3,
+        `第 ${level.id} 关「${level.name}」星级规则超过 3 条`
+      );
+    }
+  });
+
+  test("所有内置关卡的 maxShots 在 1-20 范围内", () => {
+    for (const level of levels) {
+      assertTrue(
+        level.maxShots >= 1 && level.maxShots <= 20,
+        `第 ${level.id} 关「${level.name}」maxShots 超出范围`
+      );
+    }
+  });
+
+  test("所有内置关卡的 gravity 在合理范围内", () => {
+    for (const level of levels) {
+      assertTrue(
+        level.gravity > 0 && level.gravity <= 0.5,
+        `第 ${level.id} 关「${level.name}」gravity 超出范围`
+      );
+    }
+  });
+
+  test("所有内置关卡的 bounce 在 0.3-0.95 范围内", () => {
+    for (const level of levels) {
+      assertTrue(
+        level.bounce >= 0.3 && level.bounce <= 0.95,
+        `第 ${level.id} 关「${level.name}」bounce 超出范围`
+      );
+    }
   });
 });
 
